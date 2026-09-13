@@ -1,0 +1,36 @@
+{
+    "schemaVersion": 1,
+    "id": "differangle",
+    "version": "${version}",
+    "name": "Differangle",
+    "description": "",
+    "authors": [],
+    "contact": {},
+    "license": "All-Rights-Reserved",
+    "icon": "assets/differangle/icon.png",
+    "environment": "*",
+    "entrypoints": {
+        "fabric-datagen": [
+            "net.astrorbits.differangle.client.DifferangleDataGenerator"
+        ],
+        "client": [
+            "net.astrorbits.differangle.client.DifferangleClient"
+        ],
+        "main": [
+            "net.astrorbits.differangle.Differangle"
+        ]
+    },
+    "mixins": [
+        "differangle.mixins.json",
+        {
+            "config": "differangle.client.mixins.json",
+            "environment": "client"
+        }
+    ],
+    "depends": {
+        "fabricloader": ">=${loader_version}",
+        "fabric-language-kotlin": ">=${kotlin_loader_version}",
+        "fabric-api": "*",
+        "minecraft": "${minecraft_version}"
+    }
+}
