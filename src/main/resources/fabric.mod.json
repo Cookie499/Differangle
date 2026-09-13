@@ -3,12 +3,11 @@
     "id": "differangle",
     "version": "${version}",
     "name": "Differangle",
-    "description": "",
+    "description": "Client-side multi-viewport camera core.",
     "authors": [],
     "contact": {},
     "license": "All-Rights-Reserved",
-    "icon": "assets/differangle/icon.png",
-    "environment": "*",
+    "environment": "client",
     "entrypoints": {
         "fabric-datagen": [
             "net.astrorbits.differangle.client.DifferangleDataGenerator"

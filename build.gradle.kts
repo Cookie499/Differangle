@@ -55,20 +55,27 @@ dependencies {
     implementation("net.fabricmc:fabric-language-kotlin:${project.property("kotlin_loader_version")}")
 
     implementation("net.fabricmc.fabric-api:fabric-api:${project.property("fabric_version")}")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.1")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.processResources {
     inputs.property("version", project.version)
     inputs.property("minecraft_version", project.property("minecraft_version"))
     inputs.property("loader_version", project.property("loader_version"))
+    inputs.property("kotlin_loader_version", project.property("kotlin_loader_version"))
     filteringCharset = "UTF-8"
 
     filesMatching("fabric.mod.json") {
         expand(
             "version" to project.version,
-            "minecraft_version" to project.property("minecraft_version"),
-            "loader_version" to project.property("loader_version"),
-            "kotlin_loader_version" to project.property("kotlin_loader_version")
+            "minecraft_version" to project.property("minecraft_version").toString(),
+            "loader_version" to project.property("loader_version").toString(),
+            "kotlin_loader_version" to project.property("kotlin_loader_version").toString()
         )
     }
 }
@@ -87,7 +94,7 @@ tasks.withType<KotlinCompile>().configureEach {
 }
 
 tasks.jar {
-    from("LICENSE") {
+    from("LICENSE.txt") {
         rename { "${it}_${project.base.archivesName.get()}" }
     }
 }
