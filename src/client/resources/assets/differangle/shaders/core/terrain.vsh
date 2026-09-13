@@ -19,6 +19,7 @@ in ivec2 UV2;
 uniform sampler2D Sampler2;
 out vec4 vertexColor;
 out vec2 texCoord;
+out vec3 cameraOffset;
 
 void main() {
     vec4 clip = CameraVP * vec4(Position + Offset.xyz, 1.0);
@@ -31,4 +32,5 @@ void main() {
 #endif
     vertexColor = Color * texelFetch(Sampler2, clamp(UV2 / 16, ivec2(0), ivec2(15)), 0);
     texCoord = UV0;
+    cameraOffset = Position + Offset.xyz;
 }

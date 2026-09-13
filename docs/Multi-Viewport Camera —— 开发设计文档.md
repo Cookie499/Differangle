@@ -4,7 +4,7 @@
 
 ## 1. 项目定位
 
-一个基于 **Fabric / Minecraft 26.2** 的纯客户端摄像机与屏幕渲染系统。
+一个基于 **Fabric / Minecraft 26.2** 的多视角摄像机与屏幕系统。Camera 与 Screen 由世界实体/方块实体持久化并同步，画面生成和合成在客户端完成。
 
 核心目标：
 
@@ -65,30 +65,33 @@ View 自身只维护：
 
 ---
 
-## 2.2 Camera 是 View，而不是 Entity
+## 2.2 CameraEntity 持久化，CameraSnapshot 提供 View
 
-Camera 不需要对应一个 Minecraft Entity。
+每个可被 Screen 绑定的 Camera 必须对应一个世界持久化 `CameraEntity`。实体 UUID 是稳定标识，实体坐标、旋转、FOV、裁剪面、开关和轨迹状态是权威数据；客户端每 tick 从实体同步状态派生不可变的 `CameraDefinition`/`CameraSnapshot`，供渲染器构造 View。
 
 ```kotlin
 data class CameraDefinition(
-    val id: Identifier,
-    var position: Vec3,
-    var rotation: Quaternionf,
-    var fov: Float,
-    var nearPlane: Float,
-    var farPlane: Float
+    val id: UUID,
+    val position: Vec3,
+    val rotation: Quaternionf,
+    val fov: Float,
+    val nearPlane: Float,
+    val farPlane: Float,
+    val enabled: Boolean
 )
 ```
 
-Camera 只描述：
+CameraSnapshot 只描述当前渲染时刻：
 
 > “从哪里看、朝哪里看、用什么 Projection 看。”
+
+它不承担持久化。删除 CameraEntity 后，客户端快照与 GPU 缓存随之失效；CameraEntity 关闭时，绑定 Screen 显示黑色并停止该 Camera 的所有渲染工作。
 
 ---
 
 ## 2.3 Screen 是 Surface，而不是 Camera
 
-Screen 不拥有渲染逻辑。
+Screen 不拥有世界渲染逻辑，但 `ScreenBlockEntity` 持久化绑定 UUID、Transform、分辨率、FPS 和 `enabled`。关闭 Screen 时保留基座、边框和连接杆，显示面使用固定黑色；它不采样 Texture，也不向调度器提出 Camera 更新需求。关闭 Camera 时所有绑定 Screen 同样显示黑色，并停止该 Camera 的 Culling、世界绘制、后处理和 Target 更新。
 
 ```text
 Camera
@@ -111,6 +114,8 @@ Camera A
 ```
 
 只产生一次 Camera View。
+
+Camera 更新条件是至少存在一个开启、已解析、正面可见的绑定 Screen。显示 Quad 是单面的：局部 `+Z` 为正面，CPU 需求判断和 GPU Raster 都剔除背面。背面不显示画面、不触发 Camera 更新；屏幕外壳或背板作为独立普通几何处理。
 
 ---
 
@@ -1651,6 +1656,8 @@ Embedded
 camera:
   mode: auto
 
+  enabled: true
+
   resolution:
     default: 256x144
 
@@ -1665,6 +1672,11 @@ render:
   shadows: simplified
 
   post-process: deferred
+
+screen:
+  enabled: true
+  disabled-color: "#000000"
+  render-back-face: false
 
 cache:
   geometry: true
@@ -2102,7 +2114,7 @@ N 个相对轻量的 View
 项目开发过程中必须保持以下约束：
 
 1. **Geometry Once, View Many**
-2. **Camera 是 View，不是 Entity**
+2. **CameraEntity 是持久化权威，CameraSnapshot 是渲染 View**
 3. **Screen 与 Camera 解耦**
 4. **一个 Camera 可以服务多个 Screen**
 5. **Screen 数量不应线性增加 World Render**
@@ -2116,3 +2128,4 @@ N 个相对轻量的 View
 13. **Embedded Camera 是性能优化方向，不作为第一版本阻塞条件**
 14. **Texture Camera 是稳定的 fallback**
 15. **最终目标是 Multi-Viewport Rendering，而非多个独立 Minecraft Render**
+16. **Camera/Screen 关闭时黑屏并停止对应 View 工作，背向 Screen 不产生渲染需求**

@@ -3,6 +3,7 @@
 
 # Gradle cache folder
 .gradle
+.kotlin/
 
 # Gradle build folder
 build

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "differangle_test",
+  "version": "1.0",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-client-gametest": ["net.astrorbits.differangle.test.CameraContentGameTest"]
+  },
+  "depends": { "differangle": "*", "fabric-client-gametest-api-v1": "*" }
+}

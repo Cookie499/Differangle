@@ -1,6 +1,7 @@
 package net.astrorbits.differangle.client
 
 import com.mojang.brigadier.arguments.DoubleArgumentType
+import com.mojang.brigadier.arguments.BoolArgumentType
 import com.mojang.brigadier.arguments.FloatArgumentType
 import com.mojang.brigadier.arguments.IntegerArgumentType
 import com.mojang.brigadier.arguments.StringArgumentType
@@ -28,11 +29,21 @@ object CameraCommands {
                 } })
             }
             root.then(mode)
+            val layer = literal("layer")
+            CameraLayer.entries.forEach { selected ->
+                layer.then(literal(selected.commandName).then(argument("enabled", BoolArgumentType.bool()).executes { ctx -> run(ctx, runtime) {
+                    runtime.setLayer(selected, BoolArgumentType.getBool(ctx, "enabled"))
+                    runtime.layers.summary()
+                } }))
+            }
+            root.then(layer)
             root.then(literal("status").executes { ctx -> run(ctx, runtime) {
                 val s = runtime.statistics
                 "模式=${runtime.mode.commandName} Camera=${runtime.system.cameras().size} Screen=${runtime.system.screens().size}\n" +
                     "本帧 Camera 更新=${s.cameraUpdates} Screen 绘制=${s.screenDraws} 缓存=${s.cachedCameraCount} 区块节=${runtime.sectionCount} Draw=${runtime.drawCalls}\n" +
-                    "CPU=${String.format(Locale.ROOT, "%.2f", runtime.cpuMillis)}ms；仅已编译的不透明/镂空地形，无实体/水体/粒子。\n" +
+                    "CPU=${String.format(Locale.ROOT, "%.2f", runtime.cpuMillis)}ms；${runtime.contentStatistics}\n" +
+                    "图层=${runtime.layers.summary()}\n" +
+                    "实际路径=${runtime.mode.commandName}\n" +
                     "状态=${runtime.lastError ?: runtime.compatibilityProblem() ?: "就绪"}"
             } })
             root.then(literal("list").executes { ctx -> run(ctx, runtime) {
@@ -146,5 +157,5 @@ object CameraCommands {
     private fun feedback(ctx: CommandContext<FabricClientCommandSource>, message: String): Int {
         ctx.source.sendFeedback(Component.literal("[Differangle] $message")); return 1
     }
-    private const val HELP = "demo | mode texture/embedded | status | list | clear\ncamera here/remove/fov/fps/resolution/pose <id> ...\nscreen add <id> <camera> | remove/size/pose <id> ...\npose 参数：x y z yaw pitch roll（绝对坐标/角度）。仅客户端，定义在离开世界后清空。"
+    private const val HELP = "demo | mode texture/embedded | status | list | clear\nlayer translucent/entities/block_entities/particles/weather/clouds <true|false>\ncamera here/remove/fov/fps/resolution/pose <id> ...\nscreen add <id> <camera> | remove/size/pose <id> ...\npose 参数：x y z yaw pitch roll（绝对坐标/角度）。仅客户端，定义在离开世界后清空。"
 }

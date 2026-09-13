@@ -63,6 +63,23 @@ tasks.test {
     useJUnitPlatform()
 }
 
+// Isolated GPU integration test mod; never packaged in the production jar.
+if (providers.gradleProperty("cameraGameTest").isPresent) {
+    val cameraTest = sourceSets.create("cameraGameTest") {
+        compileClasspath += sourceSets.main.get().output + sourceSets["client"].output + sourceSets["client"].compileClasspath
+        runtimeClasspath += output + compileClasspath + sourceSets["client"].runtimeClasspath
+    }
+    loom.mods.register("differangle_test") { sourceSet(cameraTest) }
+    loom.runs.register("cameraTest") {
+        client()
+        name = "Differangle Camera Integration Test"
+        source(cameraTest)
+        runDir("build/camera-gametest")
+        vmArg("-Dfabric.client.gametest")
+        vmArg("-Dfabric.client.gametest.modid=differangle_test")
+    }
+}
+
 tasks.processResources {
     inputs.property("version", project.version)
     inputs.property("minecraft_version", project.property("minecraft_version"))

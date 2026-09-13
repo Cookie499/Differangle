@@ -4,6 +4,14 @@
     "package": "net.astrorbits.differangle.mixin.client",
     "compatibilityLevel": "JAVA_25",
     "client": [
+        "CameraGameRendererMixin",
+        "EmbeddedFeaturePipelineMixin",
+        "EmbeddedEnvironmentPipelineMixin",
+        "EmbeddedParticlePipelineMixin",
+        "CameraLevelTargetsMixin",
+        "BlockEntityDispatcherAccessor",
+        "ParticleEngineAccessor",
+        "ParticleGroupAccessor"
     ],
     "injectors": {
         "defaultRequire": 1

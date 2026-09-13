@@ -1,8 +1,10 @@
 #version 330
+#moj_import <differangle:camera_environment.glsl>
 
 uniform sampler2D Sampler0;
 in vec4 vertexColor;
 in vec2 texCoord;
+in vec3 cameraOffset;
 out vec4 fragColor;
 
 #ifdef EMBEDDED
@@ -30,5 +32,13 @@ void main() {
 #ifdef CUTOUT
     if (color.a < 0.5) discard;
 #endif
-    fragColor = vec4(color.rgb, 1.0);
+    float environmentalFog = clamp((length(cameraOffset) - FogDistances.x) / (FogDistances.y - FogDistances.x), 0.0, 1.0);
+    float distanceFog = clamp((max(length(cameraOffset.xz), abs(cameraOffset.y)) - FogDistances.z) / (FogDistances.w - FogDistances.z), 0.0, 1.0);
+    fragColor = vec4(mix(color.rgb, FogColor.rgb, max(environmentalFog, distanceFog)),
+#ifdef TRANSLUCENT
+        color.a
+#else
+        1.0
+#endif
+    );
 }

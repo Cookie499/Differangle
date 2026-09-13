@@ -29,15 +29,16 @@ class CameraCompositor : AutoCloseable {
 
     fun texture(target: RenderTarget, clearColor: Vector4f): CameraRenderOutput {
         RenderSystem.getDevice().createCommandEncoder().clearColorAndDepthTextures(
-            target.colorTexture!!, clearColor, target.depthTexture!!, 1.0)
-        return CameraRenderOutput(target.colorTextureView!!, target.depthTextureView!!)
+            target.colorTexture!!, clearColor, target.depthTexture!!, 0.0)
+        return CameraRenderOutput(target.colorTextureView!!, target.depthTextureView!!, target = target)
     }
 
     fun embedded(screen: ScreenDefinition, origin: Position, mainView: Matrix4f, target: RenderTarget): CameraRenderOutput {
         ensureDepth(target.width, target.height)
-        RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(embeddedDepth!!, 1.0)
+        RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(embeddedDepth!!, 0.0)
         return CameraRenderOutput(target.colorTextureView!!, embeddedDepthView!!, target.depthTextureView!!,
-            Matrix4f(mainView).mul(screen.modelMatrix(origin)))
+            Matrix4f(mainView).mul(screen.modelMatrix(origin)),
+            BorrowedCameraTarget(target.colorTextureView!!, embeddedDepthView!!, target.width, target.height))
     }
 
     fun surface(screen: ScreenDefinition, origin: Position, mainView: Matrix4f, target: RenderTarget, color: GpuTextureView) {

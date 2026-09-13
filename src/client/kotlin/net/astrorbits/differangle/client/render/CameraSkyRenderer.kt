@@ -1,7 +1,6 @@
 package net.astrorbits.differangle.client.render
 
 import com.mojang.blaze3d.systems.RenderSystem
-import com.mojang.blaze3d.textures.FilterMode
 import java.util.Optional
 import java.util.OptionalDouble
 
@@ -18,9 +17,6 @@ class CameraSkyRenderer : CameraRenderStage {
             pass.setUniform("CameraView", context.viewUniform)
             pass.setUniform("CameraEnvironment", context.view.environmentUniform)
             if (output.embedded) pass.setUniform("Projection", RenderSystem.getProjectionMatrixBuffer()!!)
-            val sampler = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST)
-            pass.bindTexture("Celestials", context.celestialAtlas, sampler)
-            pass.bindTexture("EndSky", context.endSky, sampler)
             pass.draw(6, 1, 0, 0)
         }
     }

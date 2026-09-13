@@ -2,6 +2,7 @@ package net.astrorbits.differangle.client.render
 
 import com.mojang.blaze3d.buffers.GpuBufferSlice
 import com.mojang.blaze3d.textures.GpuTextureView
+import com.mojang.blaze3d.pipeline.RenderTarget
 import net.astrorbits.differangle.camera.CameraDefinition
 import org.joml.Matrix4f
 
@@ -19,6 +20,7 @@ data class CameraRenderOutput(
     val cameraDepth: GpuTextureView,
     val mainDepth: GpuTextureView? = null,
     val screenModelView: Matrix4f = Matrix4f(),
+    val target: RenderTarget? = null,
 ) { val embedded get() = mainDepth != null }
 
 data class CameraDrawContext(

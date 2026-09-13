@@ -1,6 +1,6 @@
 # 摄像机实体与显示屏方块方案讨论
 
-本文讨论下一阶段的游戏内资源模型。本阶段先确定数据契约与生命周期，不立即实现方块、实体或轨迹系统。
+本文确定下一阶段的游戏内资源模型与数据契约。Camera 必须依赖可持久化实体存在；Screen 必须依赖可持久化方块实体存在。客户端渲染状态只是两者的派生快照，不是配置的权威来源。
 
 ## 结论
 
@@ -10,11 +10,13 @@
 Screen 基座/支架方块实体
   └── screenUuid, cameraUuid, size, resolution, fps, enabled
 
-Camera 实体（客户端实体，可 Invisible）
-  └── cameraUuid, position, rotation, fov, near/far, interpolation, path
+Camera 实体（世界持久化、同步到客户端，可 Invisible）
+  └── cameraUuid, position, rotation, fov, near/far, interpolation, path, enabled
 ```
 
-Screen 与 Camera 通过 UUID 关联，而不是保存实体运行时对象引用。方块实体负责持久化和方块位置；Camera 实体负责位置、朝向、可见性和轨迹。删除或卸载一方时，另一方保留数据但渲染状态变为“未解析”，不自动删除用户配置。
+Screen 与 Camera 通过 UUID 关联，而不是保存实体运行时对象引用。方块实体负责持久化 Screen 配置和方块位置；Camera 实体是 Camera 配置、位置、朝向、开关和轨迹的唯一持久化权威。客户端的 `CameraDefinition`/`CameraSnapshot` 每 tick 从已同步实体派生，不得脱离实体单独保存为第二份 Camera。删除或卸载一方时，另一方保留关联 UUID，但 Screen 显示黑色，不自动删除用户配置。
+
+这意味着资源化阶段会从当前纯客户端原型扩展出服务端/通用侧的 `CameraEntity` 与 `ScreenBlockEntity` 保存和同步代码。世界存档加载实体与方块实体，客户端只负责解析 UUID、建立运行时索引和管理 GPU 资源。单人游戏也遵循同一规则，不另设客户端临时持久化格式。
 
 ## 参考图转化出的几何约束
 
@@ -57,7 +59,7 @@ Screen 方块实体持久化字段建议：
 | `resolution_width`, `resolution_height` | int | Target 分辨率，限制在 16–2048 |
 | `update_rate` | int | FPS 上限，限制在 1–240 |
 | `mode` | enum | `texture`、`embedded` 或 `auto`；当前建议默认 texture |
-| `enabled` | bool | 是否绘制和参与调度 |
+| `enabled` | bool | Screen 开关；关闭时保留边框/支架并显示黑色显示面，不请求 Camera 画面 |
 | `uv_flip` | enum | 纹理上下/左右方向，解决方块朝向和 UV 约定 |
 | `revision` | long | 配置变化计数；用于失效 Frame Cache |
 
@@ -73,15 +75,36 @@ Screen 方块实体持久化字段建议：
 
 渲染 Target、可见区块集合和 GPU 句柄禁止写入方块实体 NBT。它们属于客户端运行时缓存，并由 `screen_uuid` + `revision` 作为键。
 
+### 开关、黑屏与调度
+
+Camera 与 Screen 都保存独立的 `enabled`。关闭不删除资源对象、不解除 UUID 绑定，也不隐藏屏幕外壳：显示面改用固定黑色材质，跳过 Camera Texture 采样、Embedded 世界绘制和后处理。
+
+| 状态 | 显示面 | Camera 更新需求 | 缓存处理 |
+| --- | --- | --- | --- |
+| Screen 开、Camera 开且已解析 | Camera 画面 | 当前 Screen 可见且正面朝向观察者时提出需求 | 正常创建或复用 |
+| Screen 关 | 黑色 | 当前 Screen 不提出需求 | 可保留短期缓存；若无其他有效 Screen 使用则释放 |
+| Camera 关 | 所有绑定 Screen 黑色 | Camera 完全不进入更新队列 | 立即释放该 Camera 的颜色/深度 Target 和历史资源 |
+| Camera 未绑定、未解析或跨维度不可用 | 黑色 | 不提出需求 | 不创建 Target |
+
+如果同一 Camera 绑定多个 Screen，只要至少一个“Screen 开启、Camera 开启、已解析、在正面可见范围内”的 Screen 提出需求，Camera 就按自己的 FPS 和预算更新一次，其余开启的 Screen 共享缓存。关闭其中一个 Screen 不应让仍在使用的 Camera 停止；关闭最后一个有效 Screen 后停止更新并允许释放缓存。重新开启时先显示黑色，等第一帧成功完成后再切换到 Camera 画面，禁止显示未完成或属于旧 revision 的 Target。
+
+黑屏必须走常量颜色 Surface 管线，不应为了生成黑色而分配 Camera Target。屏幕边框、连接杆和基座仍可作为普通客户端几何绘制，其成本与世界二次视图无关。
+
+### 正面与背面
+
+显示画面的 Quad 只定义正面，正面法线由 Screen 局部 `+Z` 经完整 Transform 得到。背面不显示 Camera 画面，也不提交 Camera 更新需求；渲染管线开启背面剔除，并在 CPU 可见性阶段用法线与观察方向提前过滤。这样从背后观察时只可能看到外壳/背板模型，不会看到反向或镜像画面。
+
+不提供“双面屏幕”配置。关闭剔除虽然不会额外生成一份 Camera Target，但会增加可见性误判、Camera 刷新和屏幕片元绘制，因此没有保留价值。任意旋转和负缩放必须保证最终绕序与正面法线一致；需要反向安装时应旋转 Screen Transform，而不是翻转 Cull 规则。
+
 ## Camera 实体
 
-Camera 实体是客户端功能实体，不代表可碰撞的世界对象：
+Camera 实体是可保存、可同步的功能实体，不代表可碰撞的世界对象：
 
 - 默认 `invisible = true`、无阴影、无碰撞、无重力、无选择框。
 - 可选调试可见模式，显示轴线、视锥体、UUID 和路径关键帧。
 - 实体位置使用 Minecraft 世界坐标；旋转使用 yaw、pitch、roll，内部转换为规范化四元数。
 - 实体 UUID 是主标识。不要把实体名称作为关联键；名称可以重命名。
-- 实体可以在客户端世界切换时重建，但 UUID 和保存数据必须恢复。
+- 世界保存/加载负责恢复实体 UUID 与 Camera 数据；客户端换维度或重新加入时从实体同步重新建立索引。
 
 Camera 实体持久化字段建议：
 
@@ -90,6 +113,7 @@ Camera 实体持久化字段建议：
 | `camera_uuid` | UUID | 稳定关联标识 |
 | `display_name` | string | UI/指令显示名称，不参与关联 |
 | `invisible` | bool | 是否隐藏调试实体 |
+| `enabled` | bool | Camera 总开关；关闭时停止所有视图更新并让绑定 Screen 黑屏 |
 | `position` | double[3] | 可选冗余；实体本身的坐标是权威值 |
 | `yaw`, `pitch`, `roll` | float | 角度，加载时规范化 |
 | `fov` | float | 垂直 FOV，建议 1–179 |
@@ -102,7 +126,7 @@ Camera 实体持久化字段建议：
 | `path_time` | double | 当前轨迹时间，单位 tick 或秒，必须明确一种 |
 | `path_loop` | enum | `none`、`loop`、`ping_pong` |
 
-Position 的权威关系需要固定：运行时以实体坐标/旋转为当前值；轨迹播放器每 tick 计算目标值并写回实体状态；NBT 只在世界保存或显式修改时更新，避免每帧写盘。
+Position 的权威关系固定为：运行时以实体坐标/旋转为当前值；轨迹播放器每 tick 计算目标值并写回实体状态；世界保存时由实体序列化当前位置与轨迹播放状态。不要每帧主动触发存盘，也不要在客户端另存一份可与实体分叉的 Camera 配置。
 
 ## 关键帧和插值
 
@@ -153,6 +177,7 @@ tick 时间 → path_time
 /differangle camera select <uuid|name>
 /differangle camera bind <screen-pos|screen-uuid> <camera-uuid>
 /differangle camera invisible <uuid|name> <true|false>
+/differangle camera enabled <uuid|name> <true|false>
 /differangle camera pose <uuid|name> <x> <y> <z> <yaw> <pitch> <roll>
 /differangle camera fov <uuid|name> <degrees>
 /differangle camera move <uuid|name> <x> <y> <z> [ticks]
@@ -164,9 +189,10 @@ tick 时间 → path_time
 /differangle camera pause|stop|seek <uuid|name> ...
 /differangle screen configure <pos|uuid> <width> <height> <resX> <resY> <fps>
 /differangle screen bind <pos|uuid> <camera-uuid>
+/differangle screen enabled <pos|uuid> <true|false>
 ```
 
-命令解析、权限和跨世界定位仍需区分：客户端命令只影响本地客户端实体/缓存；若未来需要服务器保存 Camera/Screen，应另加服务端协议和权限，不能把客户端命令伪装成服务器状态。
+修改持久化 Camera/Screen 的指令必须发送到服务端执行，并经过权限、维度和 UUID 校验；客户端调试指令只能修改显示诊断、临时选中状态或本地渲染选项，不能伪装成世界持久化状态。单人世界通过集成服务端走相同命令路径。
 
 建议 API：
 
@@ -178,12 +204,14 @@ interface CameraController {
     fun attachPath(id: UUID, path: CameraPath?)
     fun seek(id: UUID, time: Double)
     fun setInvisible(id: UUID, invisible: Boolean)
+    fun setEnabled(id: UUID, enabled: Boolean)
+    fun setScreenEnabled(screen: ScreenHandle, enabled: Boolean)
     fun bind(screen: ScreenHandle, camera: UUID?)
     fun snapshot(id: UUID): CameraSnapshot?
 }
 ```
 
-所有公开 API 修改都必须在客户端主线程排队；实际 GPU Target 创建/释放必须在渲染线程执行。`setPose(durationTicks = 0)` 是立即设置，持续时间大于零时创建一个临时的两点轨迹；这让 `/move` 和 Replay 导入共享同一套行为。
+持久化字段的公开 API 修改必须在服务端主线程执行，再通过实体/方块实体同步到客户端；客户端收到快照后在客户端主线程更新索引，实际 GPU Target 创建/释放仍在渲染线程执行。`setPose(durationTicks = 0)` 是立即设置，持续时间大于零时创建一个临时的两点轨迹；这让 `/move` 和 Replay 导入共享同一套行为。
 
 ## 与 Replay 关键帧的关系
 
@@ -212,7 +240,7 @@ reflectedDirection = direction - 2 * dot(direction, n) * n
 
 实际实现应使用矩阵反射变换 `R`，再从 `R * mainView` 得到反射 View；不要只反射 yaw/pitch，也不要在欧拉角上做镜像。反射视图需要独立的 Frustum、FOV、近远裁剪和 Camera-specific Depth。
 
-镜面投影要处理手性翻转：反射会改变绕序和法线方向。渲染管线必须明确是否关闭背面剔除，或对反射 View 使用等价的 winding 修正；不能靠交换纹理左右方向掩盖几何手性问题。
+镜面投影要处理手性翻转：反射会改变绕序和法线方向。镜面与普通 Screen 一样只显示正面；反射 View 使用等价的 winding 修正并保持镜面 Surface 背面剔除，不能靠交换纹理左右方向掩盖几何手性问题。背面观察测试应验证不生成反射 Target、不提交反射绘制。
 
 ### 两种实现路径
 
@@ -346,7 +374,7 @@ interface MirrorController {
 ### 实现顺序
 
 1. 先把 `surface_type` 和镜面字段加入 Screen 配置校验，但仍显示占位色。
-2. 实现平面反射矩阵和反射 Frustum 单元测试，覆盖任意旋转镜面、背面观察和远距离坐标。
+2. 实现平面反射矩阵和反射 Frustum 单元测试，覆盖任意旋转镜面、背面不渲染和远距离坐标。
 3. 在 Texture 模式完成单次反射、镜面裁剪和 Target 缓存。
 4. 加入镜面可见性检测、动态分辨率和更新预算。
 5. 最后再做 Embedded 镜面 Stencil/深度合成和递归深度 2。
@@ -363,15 +391,17 @@ interface MirrorController {
 6. Camera 删除时 Screen 进入未绑定状态，显示占位色并保留 `camera_uuid` 以便恢复；提供显式“解绑并清空”操作。
 7. 客户端世界切换或资源重载时释放所有 GPU 资源，重新扫描方块实体和 Camera 实体。
 8. 网络/存档加载的数据全部经过范围校验；非法 FOV、分辨率、尺寸、NaN 坐标和过长轨迹必须拒绝或回退默认值。
+9. Camera 或 Screen 关闭时持久化 `enabled=false`；客户端释放不再被任何有效 Screen 需要的 Camera Target，Surface 显示常量黑色。
+10. 背向观察者的 Screen 不进入可见需求集合；外壳可见性与画面 Quad 的正面可见性分别判断。
 
 ## 分阶段实现建议
 
 下一阶段先做数据和可观察性，不直接上完整 Replay：
 
 1. `ScreenBlockEntity` + `screen_base` 方块，完成 NBT、放置/破坏和 UUID 生成。
-2. `CameraEntity` 的 Invisible、无碰撞、UUID 注册和基础同步。
+2. `CameraEntity` 的世界持久化、Invisible、无碰撞、UUID 注册和服务端到客户端同步。
 3. `CameraController`，让现有 `CameraDefinition` 从实体快照生成；保留现有客户端指令作为兼容入口。
-4. `/differangle screen ...` 与 `/differangle camera ...` 的绑定、配置和状态指令。
+4. `/differangle screen ...` 与 `/differangle camera ...` 的绑定、配置、enabled 和状态指令。
 5. 两点 move/look 插值，再加入 step/linear/smoothstep。
 6. CameraPath 和关键帧列表，最后接 Replay 适配器与 cubic。
 7. 基于方块实体朝向计算 Screen Surface，并补齐支架外观。
@@ -380,7 +410,8 @@ interface MirrorController {
 
 ## 未决问题
 
-- Camera 实体由客户端独有还是由服务端生成并同步？当前建议先客户端独有。
+Camera 实体由服务端世界生成、保存并同步；客户端不拥有独立的持久化 Camera。以下问题仍待后续确定：
+
 - Screen 方块是否允许多人看到各自不同的客户端 Camera？若允许，绑定必须明确是本地绑定还是共享绑定。
 - 屏幕尺寸的权威来源是方块状态、方块实体 NBT 还是相邻支架数量？当前建议方块状态只保存朝向，数值在方块实体。
 - `path_time` 使用 tick 还是秒？当前建议使用 tick 的 double，Replay 导入时保留原始时间换算。

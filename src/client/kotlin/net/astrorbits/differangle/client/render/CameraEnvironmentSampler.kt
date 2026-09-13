@@ -25,6 +25,8 @@ data class CameraEnvironment(
     val skybox: Skybox, val sunAngle: Float, val moonAngle: Float, val starAngle: Float,
     val moonPhase: MoonPhase, val starBrightness: Float, val rainBrightness: Float,
     val skyVisibility: Float, val belowHorizon: Boolean, val medium: String,
+    val cloudColor: Int, val cloudHeight: Float,
+    val skyFogEnd: Float,
 )
 
 class CameraEnvironmentSampler {
@@ -58,6 +60,7 @@ class CameraEnvironmentSampler {
                 getValue(Attributes.SUN_ANGLE, 1f); getValue(Attributes.MOON_ANGLE, 1f)
                 getValue(Attributes.STAR_ANGLE, 1f); getValue(Attributes.STAR_BRIGHTNESS, 1f)
                 getValue(Attributes.SUNRISE_SUNSET_COLOR, 1f); getValue(Attributes.MOON_PHASE, 1f)
+                getValue(Attributes.CLOUD_COLOR, 1f); getValue(Attributes.CLOUD_HEIGHT, 1f)
             }
         }
         return entry
@@ -123,6 +126,8 @@ class CameraEnvironmentSampler {
             probe.getValue(Attributes.MOON_PHASE, partial), probe.getValue(Attributes.STAR_BRIGHTNESS, partial),
             1f - rain, (skyEnd / 128f).coerceIn(0f, 1f),
             camera.position.y < level.levelData.getHorizonHeight(level), medium,
+            probe.getValue(Attributes.CLOUD_COLOR, partial), probe.getValue(Attributes.CLOUD_HEIGHT, partial),
+            skyEnd,
         )
     }
 }

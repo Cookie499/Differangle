@@ -63,4 +63,9 @@ data class CameraDefinition(
     fun projectionMatrix(zZeroToOne: Boolean = false): Matrix4f = Matrix4f().perspective(
         Math.toRadians(fov.toDouble()).toFloat(), resolution.aspect, nearPlane, farPlane, zZeroToOne,
     )
+
+    /** Vanilla feature pipelines use reversed Z: near=1, far=0 in the depth attachment. */
+    fun renderProjectionMatrix(zZeroToOne: Boolean): Matrix4f = Matrix4f().perspective(
+        Math.toRadians(fov.toDouble()).toFloat(), resolution.aspect, farPlane, nearPlane, zZeroToOne,
+    )
 }
