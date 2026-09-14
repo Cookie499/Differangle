@@ -106,6 +106,28 @@ class CameraContentGameTest : FabricClientGameTest {
             context.waitTicks(15)
             awaitDraw(context)
             context.takeScreenshot("camera-native-main-occlusion")
+            world.server.runCommand("setblock 0 -59 1 minecraft:air")
+            context.runOnClient<RuntimeException> { client ->
+                val runtime = DifferangleClient.runtime
+                val definition = runtime.system.cameras().single().copy(position = Position(0.0, -58.38, 3.0), rotation = Rotation.minecraftDegrees(180f, 0f))
+                val observer = net.astrorbits.differangle.client.render.VirtualCamera(definition, client.level!!)
+                check(observer.entity() != null)
+                check(observer.entity() !== client.player)
+                check(observer.entity()!!.position() == observer.position())
+                check(client.level!!.entitiesForRendering().none { it === observer.entity() })
+                runtime.system.putCamera(definition)
+                runtime.system.putScreen(runtime.system.screens().single().copy(rotation = Rotation.minecraftDegrees(0f, 0f)))
+            }
+            for (mode in CameraMode.entries) {
+                context.runOnClient<RuntimeException> { DifferangleClient.runtime.switchMode(mode) }
+                context.waitTicks(10)
+                awaitDraw(context)
+                context.runOnClient<RuntimeException> { client ->
+                    check(client.gameRenderer.mainCamera().entity() === client.player)
+                    check(client.player!!.position().distanceTo(net.minecraft.world.phys.Vec3(0.5, -60.0, 0.5)) < 0.01)
+                }
+                context.takeScreenshot("camera-player-${mode.commandName}")
+            }
             context.runOnClient<RuntimeException> {
                 check(DifferangleClient.runtime.lastError == null)
                 check(NativeCameraScope.target == null)

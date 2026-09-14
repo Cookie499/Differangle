@@ -7,6 +7,8 @@ import net.minecraft.client.renderer.culling.Frustum
 import net.minecraft.client.renderer.state.level.CameraRenderState
 import net.minecraft.core.BlockPos
 import net.minecraft.world.phys.Vec3
+import net.minecraft.world.entity.EntityTypes
+import net.minecraft.world.entity.Marker
 import org.joml.Matrix4f
 import org.joml.Vector3f
 
@@ -22,6 +24,14 @@ class VirtualCamera(val definition: CameraDefinition, level: ClientLevel) : Came
         setPosition(definition.position.x, definition.position.y, definition.position.z)
         val euler = orientation.getEulerAnglesYXZ(Vector3f())
         setRotation(180f - Math.toDegrees(euler.y.toDouble()).toFloat(), -Math.toDegrees(euler.x.toDouble()).toFloat())
+        // Render extensions (e.g. 3D Skin Layers) use Camera.entity() for distance checks.
+        // A detached, unregistered marker represents this observer without moving the player,
+        // spawning a world entity, or confusing the remote position with the main camera.
+        setEntity(Marker(EntityTypes.MARKER, level).also {
+            it.snapTo(position(), yRot(), xRot())
+            it.setOldPosAndRot()
+            it.isInvisible = true
+        })
     }
     override fun rotation() = orientation
     override fun getFov() = definition.fov

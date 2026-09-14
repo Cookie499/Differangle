@@ -29,6 +29,7 @@ Embedded：地形、原版实体/方块实体、粒子、雨雪和云直接绘�
 - 短作用域重定向原版输出 Target 和主 Camera getter，并保存/恢复投影、ModelView、Fog、Lighting、GlobalSettings、Scissor、输出附件、实体分发器与方块实体分发器的观察位置。
 - 每个 Camera 的原版渲染结束后释放临时快照并轮换副视图缓冲；离开世界、模式切换、图层变更和资源重载时关闭所属 GPU 资源。
 - 不调用 `LevelRenderer.render()`，不触发第二次世界模拟。递归原版摄像头作用域会直接被拒绝；未来基座/镜子的递归策略仍按方案文档单独接入。
+- VirtualCamera 为 `Camera.entity()` 提供未注册到世界的临时 Marker，位置和角度与虚拟观察者一致，兼容 3D Skin Layers 等通过摄像机实体计算距离的扩展。该对象不 tick、不生成网络实体、不移动玩家，也不替代规划中的持久化 CameraEntity。
 - 复用原版普通混合次序，不执行 Fabulous 多 Target 的透明后处理链；复杂透明交叠和第三方自定义渲染器需另行适配。
 
 ## 指令
