@@ -48,7 +48,7 @@ object CameraPipelines {
             .withVertexShader(id("core/surface")).withFragmentShader(id("core/surface"))
             .withBindGroupLayout(surface).withBindGroupLayout(BindGroupLayouts.PROJECTION)
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-            .withDepthStencilState(DepthStencilState.DEFAULT).withCull(false)
+            .withDepthStencilState(DepthStencilState.DEFAULT).withCull(true)
         if (textured) builder.withShaderDefine("TEXTURED").withBindGroupLayout(BindGroupLayouts.SAMPLER0)
         return RenderPipelines.register(builder.build())
     }

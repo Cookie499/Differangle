@@ -55,6 +55,7 @@ class CameraRuntime : AutoCloseable {
 
     fun tick(client: Minecraft) {
         syncWorld(client)
+        net.astrorbits.differangle.client.world.WorldClient.tick(client, this)
         world?.let { environments.tick(it, system.cameras()) }
     }
 
@@ -90,26 +91,28 @@ class CameraRuntime : AutoCloseable {
     fun render(renderContext: LevelRenderContext) {
         val client = Minecraft.getInstance()
         syncWorld(client)
-        if (world == null || system.screens().isEmpty() || lastError != null) return
+        if (world == null || (system.screens().isEmpty() && net.astrorbits.differangle.client.world.WorldClient.debugCameras.isEmpty()) || lastError != null) return
         compatibilityProblem()?.let { fail(it); return }
         val dispatcher = renderContext.levelRenderer().sectionRenderDispatcher() ?: return
         val camera = renderContext.levelState().cameraRenderState
         val origin = Position(camera.pos.x, camera.pos.y, camera.pos.z)
         val cameras = system.cameras().associateBy { it.id }
-        val visible = system.screens().filter {
-            it.enabled && cameras[it.cameraId]?.enabled == true && camera.cullFrustum.isVisible(bounds(it, origin))
+        val surfaces = system.screens().filter {
+            it.isFrontFacing(origin) && camera.cullFrustum.isVisible(bounds(it, origin))
         }
-        if (visible.isEmpty()) {
-            statistics = FrameStatistics(0, 0, system.cameras().count { system.frame(it.id) != null })
-            sectionCount = 0; drawCalls = 0; cpuMillis = 0.0
-            return
-        }
+        val visible = surfaces.filter { it.enabled && cameras[it.cameraId]?.enabled == true }
         val start = System.nanoTime()
         context = renderContext
         dispatcher.lock()
         try {
             val gpu = renderer ?: CameraWorldRenderer(layers).also { renderer = it }
             gpu.beginFrame()
+            val target = renderContext.gameRenderer().mainRenderTarget()
+            net.astrorbits.differangle.client.world.WorldClient.blocks.forEach { block ->
+                net.astrorbits.differangle.client.world.WorldGeometry.housing(block,origin,camera.viewRotationMatrix,target,gpu.compositor)
+            }
+            net.astrorbits.differangle.client.world.WorldGeometry.debug(origin,camera.viewRotationMatrix,target,gpu.compositor)
+            surfaces.forEach { gpu.compositor.solid(it.modelMatrix(origin),camera.viewRotationMatrix,target) }
             if (mode == CameraMode.TEXTURE) {
                 statistics = system.renderFrame(start, visible.map { it.id }, origin)
             } else {

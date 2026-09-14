@@ -1,0 +1,8 @@
+{"variants": {
+  "facing=south": {"model": "differangle:block/screen_base"},
+  "facing=north": {"model": "differangle:block/screen_base", "y": 180},
+  "facing=east": {"model": "differangle:block/screen_base", "y": 270},
+  "facing=west": {"model": "differangle:block/screen_base", "y": 90},
+  "facing=up": {"model": "differangle:block/screen_base", "x": 90},
+  "facing=down": {"model": "differangle:block/screen_base", "x": 270}
+}}

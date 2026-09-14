@@ -66,7 +66,7 @@ class CameraSystemTest {
         assertEquals(listOf("a"), backend.renders)
     }
 
-    @Test fun `camera changes invalidate the target and cascade removal clears screens`() {
+    @Test fun `camera changes invalidate the target and removal retains screen bindings`() {
         val backend = Backend()
         val system = CameraSystem(backend)
         val camera = CameraDefinition("a")
@@ -80,7 +80,8 @@ class CameraSystemTest {
         assertEquals(1, backend.targets[0].closes)
         system.renderFrame(1, listOf("s"), Position())
         system.removeCamera("a")
-        assertTrue(system.screens().isEmpty())
+        assertEquals("a", system.screens().single().cameraId)
+        assertEquals(0, system.renderFrame(2, listOf("s"), Position()).cameraUpdates)
         assertEquals(listOf(1, 1), backend.targets.map { it.closes })
         system.clear()
         assertEquals(listOf(1, 1), backend.targets.map { it.closes })
@@ -99,8 +100,9 @@ class CameraSystemTest {
         system.putScreen(ScreenDefinition("s2", "b"))
         assertNull(system.frame("a"))
         assertEquals(1, backend.targets.single().closes)
-        assertThrows(IllegalArgumentException::class.java) { system.putScreen(ScreenDefinition("bad", "missing")) }
-        assertEquals(listOf("s2"), system.screens().map { it.id })
+        system.putScreen(ScreenDefinition("unresolved", "missing"))
+        assertEquals(0,system.renderFrame(1,listOf("unresolved"),Position()).cameraUpdates)
+        assertEquals(listOf("s2", "unresolved"), system.screens().map { it.id })
     }
 
     @Test fun `failed refresh discards partial output and can retry without waiting`() {

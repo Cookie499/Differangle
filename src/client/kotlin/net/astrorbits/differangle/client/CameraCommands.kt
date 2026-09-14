@@ -19,6 +19,16 @@ object CameraCommands {
     fun register(runtime: CameraRuntime) {
         ClientCommandRegistrationCallback.EVENT.register { dispatcher, _ ->
             val root = literal("differangle").executes { ctx -> feedback(ctx, HELP) }
+            val preview = literal("preview")
+            // Fabric owns this client root. Explicitly forward world commands so its parser
+            // cannot swallow server subcommands (including edits submitted by the screen GUI).
+            for (kind in listOf("camera", "screen")) {
+                root.then(literal(kind).then(argument("worldOptions", StringArgumentType.greedyString()).executes { ctx ->
+                    ctx.source.client.connection?.send(net.minecraft.network.protocol.game.ServerboundChatCommandPacket(
+                        "differangle $kind ${StringArgumentType.getString(ctx, "worldOptions")}"))
+                    1
+                }))
+            }
             val mode = literal("mode")
             CameraMode.entries.forEach { selected ->
                 mode.then(literal(selected.commandName).executes { ctx -> run(ctx, runtime) {
@@ -50,8 +60,8 @@ object CameraCommands {
                 runtime.system.cameras().joinToString("\n") { "Camera ${it.id}: FOV=${it.fov} FPS=${it.updateRate} ${it.resolution.width}×${it.resolution.height}" } +
                     "\n" + runtime.system.screens().joinToString("\n") { "Screen ${it.id} → ${it.cameraId} (${it.width}×${it.height})" }
             } })
-            root.then(literal("clear").executes { ctx -> run(ctx, runtime) { runtime.clear(); "已清空 Camera、Screen 和缓存。" } })
-            root.then(literal("demo").executes { ctx -> run(ctx, runtime) {
+            preview.then(literal("clear").executes { ctx -> run(ctx, runtime) { runtime.clear(); "已清空临时预览；世界资源将在下一 tick 恢复。" } })
+            preview.then(literal("demo").executes { ctx -> run(ctx, runtime) {
                 runtime.compatibilityProblem()?.let { error(it) }
                 val cameraId = unusedId("demo_camera", runtime.system.cameras().map { it.id })
                 val screenId = unusedId("demo_screen", runtime.system.screens().map { it.id })
@@ -72,7 +82,7 @@ object CameraCommands {
                 "Camera $id 已放到当前眼睛位置和朝向。"
             } }))
             camera.then(literal("remove").then(cameraId(runtime).executes { ctx -> run(ctx, runtime) {
-                val id = getCamera(ctx, runtime).id; runtime.system.removeCamera(id); "已移除 Camera $id 及其 Screen。"
+                val id = getCamera(ctx, runtime).id; runtime.system.removeCamera(id); "已移除临时 Camera $id，关联 Screen 保留绑定并黑屏。"
             } }))
             camera.then(literal("fov").then(cameraId(runtime).then(argument("value", FloatArgumentType.floatArg(1f, 179f)).executes { ctx -> run(ctx, runtime) {
                 runtime.system.putCamera(getCamera(ctx, runtime).copy(fov = FloatArgumentType.getFloat(ctx, "value"))); "FOV 已更新。"
@@ -88,7 +98,7 @@ object CameraCommands {
             camera.then(literal("pose").then(pose(cameraId(runtime)) { ctx -> run(ctx, runtime) {
                 runtime.system.putCamera(getCamera(ctx, runtime).copy(position = position(ctx), rotation = rotation(ctx))); "Camera 位置和旋转已更新。"
             } }))
-            root.then(camera)
+            preview.then(camera)
 
             val screen = literal("screen")
             screen.then(literal("add").then(argument("id", StringArgumentType.word()).then(argument("camera", StringArgumentType.word())
@@ -109,7 +119,8 @@ object CameraCommands {
             screen.then(literal("pose").then(pose(screenId(runtime)) { ctx -> run(ctx, runtime) {
                 runtime.system.putScreen(getScreen(ctx, runtime).copy(position = position(ctx), rotation = rotation(ctx))); "Screen 位置和旋转已更新。"
             } }))
-            root.then(screen)
+            preview.then(screen)
+            root.then(preview)
             dispatcher.register(root)
         }
     }
@@ -157,5 +168,7 @@ object CameraCommands {
     private fun feedback(ctx: CommandContext<FabricClientCommandSource>, message: String): Int {
         ctx.source.sendFeedback(Component.literal("[Differangle] $message")); return 1
     }
-    private const val HELP = "demo | mode texture/embedded | status | list | clear\nlayer translucent/entities/block_entities/particles/weather/clouds <true|false>\ncamera here/remove/fov/fps/resolution/pose <id> ...\nscreen add <id> <camera> | remove/size/pose <id> ...\npose 参数：x y z yaw pitch roll（绝对坐标/角度）。仅客户端，定义在离开世界后清空。"
+    private const val HELP = "世界资源：/differangle camera create <name> | camera list | screen bind <x y z> <UUID>；右键显示屏基座打开设置。\n" +
+        "本地渲染：/differangle mode texture|embedded；layer <图层> <true|false>；status；list。\n" +
+        "临时原型：/differangle preview demo|clear|camera|screen ...（不保存）。"
 }

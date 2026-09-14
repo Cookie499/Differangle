@@ -1,6 +1,6 @@
 # Differangle
 
-Fabric / Minecraft 26.2 多视角摄像机项目，使用 Kotlin 和 Java 25。当前画面渲染在客户端完成；计划中的 CameraEntity 与 ScreenBlockEntity 由世界持久化并同步。
+Fabric / Minecraft 26.2 多视角摄像机项目，使用 Kotlin 和 Java 25。画面渲染在客户端完成；CameraEntity 与 ScreenBlockEntity 由服务端世界持久化并同步。
 
 当前实现 **Texture-first 核心层**：Camera 与 Screen 数据、独立视图/投影矩阵、刷新调度、帧缓存和 Blaze3D RenderTarget 资源管理。
 
@@ -12,7 +12,7 @@ Fabric / Minecraft 26.2 多视角摄像机项目，使用 Kotlin 和 Java 25。�
 
 实现与约束见[核心层实现说明](docs/core-implementation.md)。
 
-实体摄像机、显示屏基座/支架、UUID 持久化、开关黑屏、单面显示、轨迹插值、Replay 适配和镜子预案见[方案讨论文档](docs/camera-entity-screen-blocks.md)。这些资源尚未实现。
+实体摄像机与显示屏已接入持久化、UUID 绑定、右键设置、支架几何、黑屏、单面显示与两点插值，见[使用说明](docs/world-resources.md)。完整轨迹、Replay 适配和镜子仍属后续阶段，设计见[方案文档](docs/camera-entity-screen-blocks.md)。带 NBT 的屏幕复制保留摄像机绑定，仅生成新的屏幕 UUID。
 
 ## 构建与测试
 

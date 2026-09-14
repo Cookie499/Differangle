@@ -18,10 +18,10 @@ import java.util.OptionalDouble
 
 /** Output allocation/mapping only. World content is drawn by CameraRenderStages. */
 class CameraCompositor : AutoCloseable {
-    private class SurfaceUniform(val modelView: Matrix4f) : DynamicUniformStorage.DynamicUniform {
-        override fun write(buffer: ByteBuffer) { Std140Builder.intoBuffer(buffer).putMat4f(modelView) }
+    private class SurfaceUniform(val modelView: Matrix4f, val color: Vector4f = Vector4f(0f,0f,0f,1f)) : DynamicUniformStorage.DynamicUniform {
+        override fun write(buffer: ByteBuffer) { Std140Builder.intoBuffer(buffer).putMat4f(modelView).putVec4(color) }
     }
-    private val surfaces = DynamicUniformStorage<SurfaceUniform>("Differangle surfaces", 64, 16)
+    private val surfaces = DynamicUniformStorage<SurfaceUniform>("Differangle surfaces", 80, 512)
     private var embeddedDepth: GpuTexture? = null
     private var embeddedDepthView: GpuTextureView? = null
     private var depthWidth = 0
@@ -52,6 +52,18 @@ class CameraCompositor : AutoCloseable {
             pass.setUniform("Surface", uniform)
             pass.bindTexture("Sampler0", color, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR))
             pass.draw(6, 1, 0, 0)
+        }
+    }
+
+    fun solid(model: Matrix4f, mainView: Matrix4f, target: RenderTarget, color: Vector4f = Vector4f(0f,0f,0f,1f)) {
+        val uniform = surfaces.writeUniform(SurfaceUniform(Matrix4f(mainView).mul(model),color))
+        RenderSystem.getDevice().createCommandEncoder().createRenderPass(
+            { "Differangle solid surface" },target.colorTextureView!!,Optional.empty(),target.depthTextureView!!,OptionalDouble.empty()
+        ).use { pass ->
+            pass.setPipeline(CameraPipelines.backgroundSurface)
+            pass.setUniform("Projection",RenderSystem.getProjectionMatrixBuffer()!!)
+            pass.setUniform("Surface",uniform)
+            pass.draw(6,1,0,0)
         }
     }
 

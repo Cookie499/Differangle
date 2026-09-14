@@ -28,15 +28,14 @@ class CameraSystem<T : CameraTarget>(
 
     fun putScreen(screen: ScreenDefinition) {
         checkIdle()
-        require(screen.cameraId in cameras) { "Unknown camera: ${screen.cameraId}" }
         val previous = screens.put(screen.id, screen)
         if (previous != null && previous.cameraId != screen.cameraId) releaseIfUnused(previous.cameraId)
+        releaseIfUnused(screen.cameraId)
     }
 
     fun removeCamera(id: String) {
         checkIdle()
         cameras.remove(id)
-        screens.entries.removeIf { it.value.cameraId == id }
         release(id)
     }
 
@@ -68,7 +67,7 @@ class CameraSystem<T : CameraTarget>(
         rendering = true
         try {
             val visible = visibleScreenIds.distinct().mapNotNull(screens::get)
-                .filter { it.enabled && cameras.getValue(it.cameraId).enabled }
+                .filter { it.enabled && cameras[it.cameraId]?.enabled == true }
             val due = visible.map { cameras.getValue(it.cameraId) }.distinctBy { it.id }
                 .filter { camera -> frames[camera.id]?.let { nowNanos - it.renderedAtNanos >= camera.intervalNanos } ?: true }
                 .sortedWith(compareByDescending<CameraDefinition> {
@@ -126,7 +125,7 @@ class CameraSystem<T : CameraTarget>(
     override fun close() = clear()
 
     private fun releaseIfUnused(cameraId: String) {
-        if (screens.values.none { it.cameraId == cameraId }) release(cameraId)
+        if (screens.values.none { it.cameraId == cameraId && it.enabled }) release(cameraId)
     }
 
     private fun release(id: String) { frames.remove(id)?.target?.close() }
