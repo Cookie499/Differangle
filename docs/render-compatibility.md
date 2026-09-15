@@ -14,9 +14,9 @@
 
 只读取客户端已经加载并完成网格编译的区块，不为远程摄像机请求额外区块。半透明区块间按摄像机距离排序；区块内部沿用 Sodium 上传的索引顺序，不改写其主视角排序缓冲区。复杂交叠透明面可能仍存在排序差异。
 
-`SodiumTerrain` 走 Sodium 公开 API：由当前帧的 render list 取得 region 与可见 section 序号，再从 region 读取缓冲区、section 网格头、方块实体和动画精灵。顶点格式取 `ChunkMeshFormats.getCurrent()`（Iris 开启光影时由 Iris 覆写），而不是渲染器自身的字段；精灵动画通过 `api.texture.SpriteUtil.INSTANCE.markSpriteActive` 上报，内部实现类已标记 `forRemoval`。
+`SodiumTerrain` 的候选集是摄像机自己的区块半径，再用摄像机自己的 Frustum 剔除；不能改用 Sodium 每帧的 render list，那批列表是主视角做完遮挡剔除后的结果，主视角看不到的地形（背后、地下、被挡住）会从显示屏上整片消失。顶点格式取 `ChunkMeshFormats.getCurrent()`（Iris 开启光影时由 Iris 覆写），而不是渲染器自身的字段；精灵动画通过 `api.texture.SpriteUtil.INSTANCE.markSpriteActive` 上报，内部实现类已标记 `forRemoval`。
 
-唯一未公开的读取是 `SodiumWorldRenderer` 的 `renderSectionManager`：Sodium 0.9.1 没有为该字段提供 getter，`run/mods` 中的构建连 `SodiumWorldRenderer.getRenderLists()` 也没有（上游 tag 有）。该访问集中在 `SodiumTerrain.sectionManager`，缺失时记录一次警告并退化为不绘制 Sodium 地形，不影响主视角。因此摄像机可用的区块是主视角已加载、已编译且在当前帧 render list 中可见的区块；主视角看不到的区块不会出现在显示屏上。运行时限制为 Sodium 0.9.x / Iris 1.11.x，其他系列需要重新检查格式及调用时序。
+未公开的读取收敛为两处：`SodiumWorldRenderer.renderSectionManager` 与其 `renderSections`，Sodium 0.9.1 都没有提供 getter（`run/mods` 中的构建连 `SodiumWorldRenderer.getRenderLists()` 也没有，上游 tag 才有）。二者集中在 `SodiumTerrain.sectionManager` / `sectionStorage`，缺失时记录一次警告并退化为不绘制 Sodium 地形，不影响主视角。运行时限制为 Sodium 0.9.x / Iris 1.11.x，其他系列需要重新检查格式及调用时序。
 
 ## 构建与回归
 
