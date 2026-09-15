@@ -143,14 +143,14 @@ object SodiumTerrain {
     }
 
     /** The only non-public sodium reads: the renderer's manager and that manager's section storage have no getters. */
-    private fun sectionManager(sodium: SodiumWorldRenderer): RenderSectionManager? {
+    internal fun sectionManager(sodium: SodiumWorldRenderer): RenderSectionManager? {
         val field = managerField ?: return null
         return runCatching { field.get(sodium) as? RenderSectionManager }
             .onFailure { log.warn("Could not read the sodium section manager; sodium terrain is disabled", it) }
             .getOrNull()
     }
 
-    private fun sectionStorage(manager: RenderSectionManager): SectionStorage? {
+    internal fun sectionStorage(manager: RenderSectionManager): SectionStorage? {
         val field = storageField ?: return null
         return runCatching { field.get(manager) as? SectionStorage }
             .onFailure { log.warn("Could not read the sodium section storage; sodium terrain is disabled", it) }

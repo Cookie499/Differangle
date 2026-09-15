@@ -22,6 +22,9 @@ class VirtualCamera(val definition: CameraDefinition, level: ClientLevel) : Came
     init {
         setLevel(level)
         setPosition(definition.position.x, definition.position.y, definition.position.z)
+        // Iris queries Camera.attributeProbe directly for sun angle, sky and biome properties.
+        // A detached camera never receives vanilla Camera.tick(), so initialize its probe here.
+        attributeProbe().tick(level, position())
         val euler = orientation.getEulerAnglesYXZ(Vector3f())
         setRotation(180f - Math.toDegrees(euler.y.toDouble()).toFloat(), -Math.toDegrees(euler.x.toDouble()).toFloat())
         // Render extensions (e.g. 3D Skin Layers) use Camera.entity() for distance checks.

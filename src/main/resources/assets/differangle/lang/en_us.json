@@ -1,4 +1,5 @@
 {
+  "differangle.shaders.status": "Experimental camera shaders: %s (Texture mode, requires an active Iris shader pack). Saved to client config.",
   "block.differangle.screen_base": "Screen Base",
   "item.differangle.screen_base": "Screen Base",
   "entity.differangle.camera": "Camera",

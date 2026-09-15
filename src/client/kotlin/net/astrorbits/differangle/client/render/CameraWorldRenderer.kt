@@ -18,7 +18,7 @@ import java.nio.ByteBuffer
 import net.astrorbits.differangle.client.render.compat.RendererCompatibility
 
 /** Both output modes execute exactly the same ordered world-content stages. */
-class CameraWorldRenderer(private val layers: CameraLayers) : AutoCloseable {
+class CameraWorldRenderer(private val layers: CameraLayers, private val cameraShaders: Boolean = true) : AutoCloseable {
     private class ViewUniform(val camera: Matrix4f, val screen: Matrix4f, val zeroToOne: Boolean) : DynamicUniformStorage.DynamicUniform {
         override fun write(buffer: ByteBuffer) {
             Std140Builder.intoBuffer(buffer).putMat4f(camera).putMat4f(screen)
@@ -42,9 +42,10 @@ class CameraWorldRenderer(private val layers: CameraLayers) : AutoCloseable {
     private val views = DynamicUniformStorage<ViewUniform>("Differangle views", 144, 8)
     private val environments = DynamicUniformStorage<EnvironmentUniform>("Differangle environments", 128, 16)
     val compositor = CameraCompositor()
-    val terrainDraws get() = terrain.terrainDraws
+    private var shaderCameras: net.astrorbits.differangle.client.render.compat.IrisShaderCameras? = null
+    val terrainDraws get() = terrain.terrainDraws + (shaderCameras?.terrainDraws ?: 0)
 
-    fun beginFrame() { terrain.beginFrame(); nativeFeatures.beginFrame() }
+    fun beginFrame() { terrain.beginFrame(); nativeFeatures.beginFrame(); shaderCameras?.beginFrame() }
 
     fun prepare(camera: CameraDefinition, renderer: LevelRenderer, environment: CameraEnvironment): PreparedCameraView {
         val atlas = Minecraft.getInstance().atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS)
@@ -63,9 +64,14 @@ class CameraWorldRenderer(private val layers: CameraLayers) : AutoCloseable {
             client.atlasManager.getAtlasOrThrow(AtlasIds.BLOCKS).textureView,
             client.gameRenderer.levelLightmap(), client.atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS).textureView,
             client.textureManager.getTexture(Identifier.withDefaultNamespace("textures/environment/end_sky.png")).textureView)
+        if (cameraShaders && !output.embedded && RendererCompatibility.shadersEnabled()) {
+            val shaders = shaderCameras ?: net.astrorbits.differangle.client.render.compat.IrisShaderCameras().also { shaderCameras = it }
+            shaders.draw(context, nativeFeatures, layers)
+            return
+        }
         stages.forEach { it.draw(context) }
         if (layers.hasNativeContent) {
-            nativeFeatures.draw(context) { terrain.drawLayer(context, true) }
+            nativeFeatures.draw(context, { terrain.drawLayer(context, true) })
         } else {
             terrain.drawLayer(context, true)
         }
@@ -75,11 +81,13 @@ class CameraWorldRenderer(private val layers: CameraLayers) : AutoCloseable {
         stages.forEach { it.endFrame() }
         nativeFeatures.endFrame()
         views.endFrame(); environments.endFrame(); compositor.endFrame()
+        shaderCameras?.endFrame()
     }
     override fun close() {
         stages.forEach { it.close() }
         nativeFeatures.close()
         views.close(); environments.close(); compositor.close()
+        shaderCameras?.close()
     }
     private fun uv(sprite: TextureAtlasSprite) = Vector4f(sprite.u0, sprite.v0, sprite.u1, sprite.v1)
 }

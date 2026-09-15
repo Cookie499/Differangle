@@ -2,6 +2,7 @@ package net.astrorbits.differangle.mixin.client;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import net.astrorbits.differangle.client.render.NativeCameraScope;
+import net.astrorbits.differangle.client.render.ShaderCameraContext;
 import net.astrorbits.differangle.client.DifferangleClient;
 import net.minecraft.client.Camera;
 import net.minecraft.client.renderer.GameRenderer;
@@ -20,9 +21,11 @@ abstract class CameraGameRendererMixin {
     @Inject(method = "mainRenderTarget", at = @At("HEAD"), cancellable = true)
     private void differangle$target(CallbackInfoReturnable<RenderTarget> cir) {
         if (NativeCameraScope.target != null) cir.setReturnValue(NativeCameraScope.target);
+        else if (ShaderCameraContext.target != null) cir.setReturnValue(ShaderCameraContext.target);
     }
     @Inject(method = "mainCamera", at = @At("HEAD"), cancellable = true)
     private void differangle$camera(CallbackInfoReturnable<Camera> cir) {
         if (NativeCameraScope.observer != null) cir.setReturnValue(NativeCameraScope.observer);
+        else if (ShaderCameraContext.observer != null) cir.setReturnValue(ShaderCameraContext.observer);
     }
 }

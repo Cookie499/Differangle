@@ -11,6 +11,8 @@ import net.minecraft.core.particles.ParticleTypes
 /** Runs in a generated test world, never in run/saves or a user's current world. */
 class CameraContentGameTest : FabricClientGameTest {
     override fun runTest(context: ClientGameTestContext) {
+        // This suite compares the two basic renderers; shader output has its own opt-in GPU suite.
+        context.runOnClient<RuntimeException> { DifferangleClient.runtime.setCameraShaderRendering(false) }
         context.worldBuilder().create().use { world ->
             for (command in listOf(
                 "tp @a 0 -60 0 0 0",

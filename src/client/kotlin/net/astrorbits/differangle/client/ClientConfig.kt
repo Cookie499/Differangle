@@ -31,7 +31,18 @@ internal class ClientConfig {
     }
 
     fun saveMode(mode: CameraMode) {
-        val updated = data.deepCopy().apply { addProperty("renderMode", mode.commandName) }
+        save(data.deepCopy().apply { addProperty("renderMode", mode.commandName) })
+    }
+
+    fun loadCameraShaders(): Boolean = data.get("cameraShaders")?.let {
+        if (it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) it.asBoolean else true
+    } ?: true
+
+    fun saveCameraShaders(enabled: Boolean) {
+        save(data.deepCopy().apply { addProperty("cameraShaders", enabled) })
+    }
+
+    private fun save(updated: JsonObject) {
         Files.createDirectories(path.parent)
         val temporary = Files.createTempFile(path.parent, "differangle-", ".tmp")
         try {
@@ -41,7 +52,7 @@ internal class ClientConfig {
             } catch (_: AtomicMoveNotSupportedException) {
                 Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING)
             }
-            data.addProperty("renderMode", mode.commandName)
+            updated.entrySet().forEach { (key, value) -> data.add(key, value) }
         } finally {
             Files.deleteIfExists(temporary)
         }

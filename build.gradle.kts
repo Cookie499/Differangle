@@ -79,6 +79,14 @@ if (providers.gradleProperty("cameraGameTest").isPresent) {
         runtimeClasspath += sourceSets.main.get().output + sourceSets["client"].output + sourceSets["client"].runtimeClasspath
     }
     loom.mods.register("differangle_test") { sourceSet(cameraTest) }
+    val cameraShaderTest = providers.gradleProperty("cameraShaderTest").isPresent
+    tasks.named<ProcessResources>(cameraTest.processResourcesTaskName) {
+        inputs.property("cameraShaderTest", cameraShaderTest)
+        if (cameraShaderTest) filesMatching("fabric.mod.json") {
+            filter { line -> if (line.contains("\"fabric-client-gametest\":"))
+                "    \"fabric-client-gametest\": [\"net.astrorbits.differangle.test.CameraShaderGameTest\"]" else line }
+        }
+    }
     loom.runs.register("cameraTest") {
         client()
         name = "Differangle Camera Integration Test"

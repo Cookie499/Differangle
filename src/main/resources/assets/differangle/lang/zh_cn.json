@@ -1,4 +1,5 @@
 {
+  "differangle.shaders.status": "实验性摄像机光影：%s（仅 Texture 模式，需要启用 Iris 光影包）。已保存到客户端配置。",
   "block.differangle.screen_base": "显示屏基座",
   "item.differangle.screen_base": "显示屏基座",
   "entity.differangle.camera": "摄像机",

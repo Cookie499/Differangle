@@ -30,6 +30,15 @@ class CameraRuntime : AutoCloseable {
     }
     var mode = config.loadMode()
         private set
+    var cameraShaders = config.loadCameraShaders()
+        private set
+
+    fun setCameraShaderRendering(enabled: Boolean) {
+        RenderSystem.assertOnRenderThread()
+        config.saveCameraShaders(enabled)
+        cameraShaders = enabled
+        reloadResources()
+    }
     var lastError: String? = null
         private set
 
@@ -144,7 +153,7 @@ class CameraRuntime : AutoCloseable {
         context = renderContext
         dispatcher?.lock()
         try {
-            val gpu = renderer ?: CameraWorldRenderer(layers).also { renderer = it }
+            val gpu = renderer ?: CameraWorldRenderer(layers, cameraShaders).also { renderer = it }
             gpu.beginFrame()
             val target = renderContext.gameRenderer().mainRenderTarget()
             net.astrorbits.differangle.client.world.WorldClient.blocks.forEach { block ->

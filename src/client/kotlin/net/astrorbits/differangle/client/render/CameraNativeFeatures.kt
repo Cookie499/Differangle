@@ -61,7 +61,8 @@ class CameraNativeFeatures(private val layers: CameraLayers) : AutoCloseable {
 
     fun beginFrame() { entityCount = 0; blockEntityCount = 0; particleCount = 0; weatherColumns = 0; cloudViews = 0 }
 
-    fun draw(context: CameraDrawContext, translucentTerrain: () -> Unit) {
+    fun draw(context: CameraDrawContext, translucentTerrain: () -> Unit,
+             beforeWorld: () -> Unit = {}, beforeTranslucents: () -> Unit = {}) {
         val level = client.level ?: return
         val target = requireNotNull(context.output.target)
         val camera = VirtualCamera(context.view.camera, level)
@@ -80,6 +81,7 @@ class CameraNativeFeatures(private val layers: CameraLayers) : AutoCloseable {
                 globals.update(target.width, target.height, client.options.glintStrength().get(), level.gameTime,
                     client.deltaTracker, 0, state.pos, false)
                 client.gameRenderer.lighting().setupFor(Lighting.Entry.LEVEL)
+                beforeWorld()
                 val poses = PoseStack()
                 if (CameraLayer.ENTITIES in layers) {
                     for (entity in level.entitiesForRendering()) {
@@ -128,6 +130,7 @@ class CameraNativeFeatures(private val layers: CameraLayers) : AutoCloseable {
                 }
                 features.prepareFrame(storage).use { frame ->
                     frame.executeSolid()
+                    beforeTranslucents()
                     frame.executeTranslucent()
                     translucentTerrain()
                     frame.executeTranslucentAfterTerrain()

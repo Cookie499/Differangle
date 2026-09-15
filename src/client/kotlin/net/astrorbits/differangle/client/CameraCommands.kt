@@ -63,6 +63,12 @@ object CameraCommands {
                 } })
             }
             root.then(mode)
+            root.then(literal("shaders")
+                .executes { ctx -> feedback(ctx, text("differangle.shaders.status", runtime.cameraShaders)) }
+                .then(argument("enabled", BoolArgumentType.bool()).executes { ctx -> run(ctx, runtime) {
+                    runtime.setCameraShaderRendering(BoolArgumentType.getBool(ctx, "enabled"))
+                    text("differangle.shaders.status", runtime.cameraShaders)
+                } }))
             val layer = literal("layer").executes { ctx -> run(ctx, runtime) { Component.translatable("differangle.layer.summary",
                 Component.literal(runtime.layers.summary()), Component.literal(CameraLayer.entries.joinToString("|") { it.commandName })) } }
             CameraLayer.entries.forEach { selected ->
