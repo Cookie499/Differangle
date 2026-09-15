@@ -35,6 +35,17 @@ object WorldCommands {
     /** Text for camera actions is shared with the client-only `copy` command's documentation. */
     private const val KEY = "differangle.camera"
 
+    /**
+     * Name of the greedy argument every `screen` branch carries; the branch literal names the operation.
+     *
+     * The token is part of the wire format: the client-side `ScreenEditor` submits the same flat text, and
+     * [handleScreen] looks the payload up by this exact name. Brigadier resolves arguments by name and throws
+     * for an unknown one, so a branch declaring a different name fails the whole command with vanilla's generic
+     * "unexpected error" instead of a readable message. Declaring and reading it through one constant keeps the
+     * two sides in step, and the lookup sits inside the handler's catch, so a divergence degrades gracefully.
+     */
+    private const val SCREEN_PAYLOAD = "target"
+
     /** Tab completion for camera arguments: UUID first, then every camera name, so both target styles are visible. */
     private val CAMERA_IDS: SuggestionProvider<CommandSourceStack> = SuggestionProvider { ctx, builder ->
         val cameras = ctx.source.level.allEntities.filterIsInstance<CameraEntity>()
@@ -116,8 +127,8 @@ object WorldCommands {
                                 .then(Commands.argument("roll", FloatArgumentType.floatArg(-360f, 360f))
                                     .then(tween { context, ticks, easing -> respond(context) { pose(context, ticks, easing) } })
                                     .executes { context -> respond(context) { pose(context, 0, "linear") } }))))))))
-        .then(Commands.literal("move").then(id().then(coords { context -> respond(context) { pose(context, 0, "linear") } })))
-        .then(Commands.literal("look").then(id().then(angles { context -> respond(context) { pose(context, 0, "linear") } })))
+        .then(Commands.literal("move").then(id().then(coords { context, ticks, easing -> respond(context) { move(context, ticks, easing) } })))
+        .then(Commands.literal("look").then(id().then(angles { context, ticks, easing -> respond(context) { look(context, ticks, easing) } })))
         // Kept for existing worlds, scripts and game tests: `camera <sub> <id> ...` in one greedy argument.
         .then(Commands.argument("legacy", StringArgumentType.greedyString()).executes { legacy(it) })
 
@@ -188,11 +199,30 @@ object WorldCommands {
         val entity = camera(context)
         val target = Position(double(context, "x"), double(context, "y"), double(context, "z"))
         val rotation = Rotation.minecraftDegrees(float(context, "yaw"), float(context, "pitch"), float(context, "roll"))
+        return moved(context, entity, target, rotation, ticks, easing)
+    }
+
+    /** `move` changes the position only, so it keeps the rotation the camera already has. */
+    private fun move(context: CommandContext<CommandSourceStack>, ticks: Int, easing: String): Component {
+        val entity = camera(context)
+        val target = Position(double(context, "x"), double(context, "y"), double(context, "z"))
+        return moved(context, entity, target, entity.viewRotation, ticks, easing)
+    }
+
+    /** `look` changes the rotation only, so it keeps the position the camera already has. */
+    private fun look(context: CommandContext<CommandSourceStack>, ticks: Int, easing: String): Component {
+        val entity = camera(context)
+        val rotation = Rotation.minecraftDegrees(float(context, "yaw"), float(context, "pitch"), float(context, "roll"))
+        return moved(context, entity, Position(entity.x, entity.y, entity.z), rotation, ticks, easing)
+    }
+
+    /** Shared body of `pose`, `move` and `look`: apply the pose, then report the timing and the camera handle. */
+    private fun moved(context: CommandContext<CommandSourceStack>, entity: CameraEntity, target: Position, rotation: Rotation,
+                      ticks: Int, easing: String): Component {
         CameraController.setPose(context.source.level, entity.uuid.toString(), target, rotation, ticks, easing)
         val timing = if (ticks == 0) Component.translatable("$KEY.pose.immediate")
         else Component.translatable("$KEY.pose.timed", ticks, Component.translatable("$KEY.pose.easing.$easing"))
-        val done = Component.translatable("$KEY.pose.done", timing, handle(entity))
-        return Clickable.line(done)
+        return Clickable.line(Component.translatable("$KEY.pose.done", timing, handle(entity)))
     }
 
     /** `Camera【name】` with the UUID as the copy payload. */
@@ -204,34 +234,44 @@ object WorldCommands {
 
     private fun screen(): LiteralArgumentBuilder<CommandSourceStack> = Commands.literal("screen")
         .executes { feedback(it, Component.translatable("differangle.screen.help")) }
-        .then(screenOp("bind") { handleScreen(it) })
-        .then(screenOp("enabled") { handleScreen(it) })
-        .then(screenOp("configure") { handleScreen(it) })
-        .then(screenOp("transform") { handleScreen(it) })
-        .then(screenOp("status") { handleScreen(it) })
-        // Submitted by the screen GUI; carries the revision guard, so no player-facing tab completion.
-        .then(Commands.literal("edit").then(Commands.argument("fields", StringArgumentType.greedyString())
-            .executes { handleScreen(it) }))
+        .then(screenOp("bind"))
+        .then(screenOp("enabled"))
+        .then(screenOp("configure"))
+        .then(screenOp("transform"))
+        .then(screenOp("status"))
+        // Submitted by the screen GUI; the payload carries the revision guard, so it has no tab completion.
+        .then(screenOp("edit"))
 
-    private fun screenOp(name: String, run: (CommandContext<CommandSourceStack>) -> Int): LiteralArgumentBuilder<CommandSourceStack> =
-        Commands.literal(name).then(Commands.argument("target", StringArgumentType.greedyString()).executes(run))
+    /**
+     * One `screen` branch: the literal names the operation and [SCREEN_PAYLOAD] carries its flat arguments.
+     *
+     * The operation travels as a branch literal rather than as a token inside the payload, so Brigadier parses,
+     * validates and completes each one. `edit` is built the same way, which is what lets the screen GUI submit
+     * its settings as a single line of text.
+     */
+    private fun screenOp(name: String): LiteralArgumentBuilder<CommandSourceStack> =
+        Commands.literal(name).then(Commands.argument(SCREEN_PAYLOAD, StringArgumentType.greedyString())
+            .executes { handleScreen(it, name) })
 
     // ---------------------------------------------------------------- shared plumbing
 
     private fun id(): RequiredArgumentBuilder<CommandSourceStack, String> =
         Commands.argument("camera", StringArgumentType.word()).suggests(CAMERA_IDS)
 
-    private fun coords(run: (CommandContext<CommandSourceStack>) -> Int): RequiredArgumentBuilder<CommandSourceStack, Double> =
+    /** `move` shares the optional tween tail of `pose`, so a scripted move keeps working through either form. */
+    private fun coords(run: (CommandContext<CommandSourceStack>, Int, String) -> Int): RequiredArgumentBuilder<CommandSourceStack, Double> =
         Commands.argument("x", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0))
             .then(Commands.argument("y", DoubleArgumentType.doubleArg(-20_000_000.0, 20_000_000.0))
-                .then(Commands.argument("z", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0)).executes(run)))
+                .then(Commands.argument("z", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0))
+                    .then(tween(run)).executes { run(it, 0, "linear") }))
 
-    private fun angles(run: (CommandContext<CommandSourceStack>) -> Int): RequiredArgumentBuilder<CommandSourceStack, Float> =
+    private fun angles(run: (CommandContext<CommandSourceStack>, Int, String) -> Int): RequiredArgumentBuilder<CommandSourceStack, Float> =
         Commands.argument("yaw", FloatArgumentType.floatArg(-360f, 360f))
             .then(Commands.argument("pitch", FloatArgumentType.floatArg(-90f, 90f))
-                .then(Commands.argument("roll", FloatArgumentType.floatArg(-360f, 360f)).executes(run)))
+                .then(Commands.argument("roll", FloatArgumentType.floatArg(-360f, 360f))
+                    .then(tween(run)).executes { run(it, 0, "linear") }))
 
-    /** Optional tail of `pose`: an integer tick count followed by one of the three easing names. */
+    /** Optional tail of `pose`, `move` and `look`: an integer tick count followed by one of the three easing names. */
     private fun tween(run: (CommandContext<CommandSourceStack>, Int, String) -> Int): RequiredArgumentBuilder<CommandSourceStack, Int> =
         Commands.argument("ticks", IntegerArgumentType.integer(0, 72000))
             .then(Commands.literal("step").executes { run(it, IntegerArgumentType.getInteger(it, "ticks"), "step") })
@@ -338,30 +378,36 @@ object WorldCommands {
         }
     }
 
-    /** Flat argument lists submitted by commands and by the screen GUI, kept for world-function compatibility. */
-    private fun handleScreen(context: CommandContext<CommandSourceStack>): Int {
+    /**
+     * Flat argument lists behind every `screen` branch.
+     *
+     * Brigadier consumes the branch literal, so the payload starts at the first argument; [op] restores that
+     * token and the rest keeps exactly the shape the screen GUI and world functions submit. `edit` additionally
+     * carries the screen UUID and the revision the GUI read, so a stale editor cannot overwrite a newer change.
+     */
+    private fun handleScreen(context: CommandContext<CommandSourceStack>, op: String): Int {
         val source = context.source
-        val raw = StringArgumentType.getString(context, "target").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
         return try {
-            when (raw[0]) {
+            val raw = listOf(op) + StringArgumentType.getString(context, SCREEN_PAYLOAD).trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            when (op) {
                 "bind", "enabled", "configure", "transform", "status" -> {
-                    val required = when (raw[0]) {
+                    val required = when (op) {
                         "bind", "enabled" -> 5
                         "configure" -> 9
                         "transform" -> 10
                         else -> 4
                     }
-                    require(raw.size >= required) { "screen ${raw[0]}" }
+                    require(raw.size >= required) { "screen $op" }
                     val pos = BlockPos(raw[1].toInt(), raw[2].toInt(), raw[3].toInt())
                     val entity = CameraController.screen(source.level, pos)
                     val old = entity.config
-                    val updated = when (raw[0]) {
+                    val updated = when (op) {
                         "bind" -> old.copy(cameraUuid = if (raw[4] == "none") null else ScreenConfig.uuid(raw[4]) ?: error("bad camera UUID"))
                         "enabled" -> old.copy(enabled = flag(raw[4]))
                         "configure" -> old.copy(width = angle(raw, 4), height = angle(raw, 5), resX = raw[6].toInt(), resY = raw[7].toInt(), fps = raw[8].toInt())
                         "transform" -> old.copy(offsetX = number(raw, 4), offsetY = number(raw, 5), offsetZ = number(raw, 6), yaw = angle(raw, 7), pitch = angle(raw, 8), roll = angle(raw, 9))
                         "status" -> return feedback(context, Component.translatable("differangle.screen.status", entity.screenUuid.toString(), old.toString()))
-                        else -> error("screen ${raw[0]}")
+                        else -> error("screen $op")
                     }
                     CameraController.configure(source.level, pos, updated)
                     feedback(context, Component.translatable("differangle.screen.updated", entity.screenUuid.toString()))
