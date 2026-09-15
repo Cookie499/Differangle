@@ -56,8 +56,21 @@ public final class EmbeddedNativePipelines extends RenderPipeline {
 
     public static RenderPipeline variant(RenderPipeline pipeline) {
         RenderPipeline variant = VARIANTS.get(pipeline);
-        if (variant == null) throw new IllegalStateException("Embedded 尚未适配管线 " + pipeline.getLocation()
-            + "；请使用 /differangle mode texture");
+        if (variant == null) throw new UnadaptedPipelineException(pipeline.getLocation());
         return variant;
+    }
+
+    /** Carries the pipeline id so the render loop can report it through `differangle.render.pipeline`. */
+    public static final class UnadaptedPipelineException extends IllegalStateException {
+        private final Identifier pipeline;
+
+        UnadaptedPipelineException(Identifier pipeline) {
+            super("No embedded variant for pipeline " + pipeline);
+            this.pipeline = pipeline;
+        }
+
+        public Identifier pipeline() {
+            return this.pipeline;
+        }
     }
 }

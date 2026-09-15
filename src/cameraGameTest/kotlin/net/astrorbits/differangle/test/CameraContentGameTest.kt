@@ -36,8 +36,8 @@ class CameraContentGameTest : FabricClientGameTest {
             context.waitFor({
                 val runtime = DifferangleClient.runtime
                 check(runtime.lastError == null) { runtime.lastError!! }
-                val counts = Regex("=(\\d+)").findAll(runtime.contentStatistics).map { it.groupValues[1].toInt() }.toList()
-                counts.size == 5 && counts.all { it > 0 }
+                val counts = runtime.nativeFeatures
+                counts.entities > 0 && counts.blockEntities > 0 && counts.particles > 0 && counts.weatherColumns > 0 && counts.cloudViews > 0
             }, 400)
             context.waitTicks(30)
             context.takeScreenshot("camera-all-layers-texture")
@@ -51,8 +51,9 @@ class CameraContentGameTest : FabricClientGameTest {
             context.waitFor({
                 val runtime = DifferangleClient.runtime
                 check(runtime.lastError == null) { runtime.lastError!! }
-                val counts = Regex("=(\\d+)").findAll(runtime.contentStatistics).map { it.groupValues[1].toInt() }.toList()
-                runtime.statistics.cachedCameraCount == 0 && counts.size == 5 && counts.all { it > 0 }
+                val counts = runtime.nativeFeatures
+                runtime.statistics.cachedCameraCount == 0 &&
+                    counts.entities > 0 && counts.blockEntities > 0 && counts.particles > 0 && counts.weatherColumns > 0 && counts.cloudViews > 0
             }, 400)
             context.takeScreenshot("camera-all-layers-direct-embedded")
             context.runOnClient<RuntimeException> {
@@ -79,7 +80,7 @@ class CameraContentGameTest : FabricClientGameTest {
             context.waitFor({
                 val runtime = DifferangleClient.runtime
                 check(runtime.lastError == null) { runtime.lastError!! }
-                runtime.statistics.screenDraws > 0 && runtime.contentStatistics.contains("云视图=1")
+                runtime.statistics.screenDraws > 0 && runtime.nativeFeatures.cloudViews == 1
             }, 400)
             context.takeScreenshot("camera-clouds")
             context.runOnClient<RuntimeException> {

@@ -5,6 +5,7 @@ import com.mojang.blaze3d.systems.RenderSystem
 import net.astrorbits.differangle.camera.*
 import net.astrorbits.differangle.client.render.CameraWorldRenderer
 import net.astrorbits.differangle.client.render.CameraEnvironmentSampler
+import net.astrorbits.differangle.client.render.EmbeddedNativePipelines
 import net.astrorbits.differangle.client.render.PreparedCameraView
 import net.astrorbits.differangle.client.render.TextureCameraBackend
 import net.astrorbits.differangle.client.render.compat.IrisCameraScope
@@ -22,8 +23,6 @@ class CameraRuntime : AutoCloseable {
     private val config = ClientConfig()
     val system = CameraSystem(TextureCameraBackend(::drawTexture, ::drawSurface))
     val layers = CameraLayers()
-    var contentStatistics = "本帧尚未更新摄像头"
-        private set
 
     fun setLayer(layer: CameraLayer, enabled: Boolean) {
         layers.set(layer, enabled)
@@ -33,7 +32,20 @@ class CameraRuntime : AutoCloseable {
         private set
     var lastError: String? = null
         private set
+
+    /** The same failure as [lastError], kept as a component so the status line can stay translatable. */
+    var lastFailure: Component? = null
+        private set
     var statistics = FrameStatistics(0, 0, 0)
+        private set
+
+    /**
+     * Last frame's native feature counts, snapshot out of the renderer.
+     *
+     * The command layer renders them through `differangle.status.content`, so the numbers stay
+     * translatable and tests can assert on the values instead of on formatted text.
+     */
+    var nativeFeatures = NativeFeatureTotals()
         private set
     var sectionCount = 0
         private set
@@ -80,7 +92,8 @@ class CameraRuntime : AutoCloseable {
         statistics = FrameStatistics(0, 0, 0)
         sectionCount = 0; drawCalls = 0; cpuMillis = 0.0
         lastError = null
-        contentStatistics = "本帧尚未更新摄像头"
+        lastFailure = null
+        nativeFeatures = NativeFeatureTotals()
     }
 
     fun clear() {
@@ -88,12 +101,13 @@ class CameraRuntime : AutoCloseable {
         reloadResources()
     }
 
-    fun compatibilityProblem(): String? {
+    /** Translatable backend mismatch, rendered into the status line and the pause notice. */
+    fun compatibilityProblem(): Component? {
         val loader = FabricLoader.getInstance()
         for ((id, series) in listOf("sodium" to "0.9.", "iris" to "1.11.")) {
             val installed = loader.getModContainer(id).orElse(null) ?: continue
             val version = installed.metadata.version.friendlyString
-            if (!version.startsWith(series)) return "摄像机后端适配 $id ${series}x，当前安装的是 $version。"
+            if (!version.startsWith(series)) return Component.translatable("differangle.compat.backend", id, series, version)
         }
         return null
     }
@@ -151,10 +165,10 @@ class CameraRuntime : AutoCloseable {
             sectionCount = prepared.values.sumOf { it.terrain.sections }
             drawCalls = gpu.terrainDraws
             val native = gpu.nativeFeatures
-            contentStatistics = "实体=${native.entityCount} 方块实体=${native.blockEntityCount} 粒子=${native.particleCount} 降水列=${native.weatherColumns} 云视图=${native.cloudViews}"
+            nativeFeatures = NativeFeatureTotals(native.entityCount, native.blockEntityCount, native.particleCount, native.weatherColumns, native.cloudViews)
         } catch (failure: Exception) {
             logger.error("Camera rendering failed in {} mode", mode.commandName, failure)
-            fail(failure.message ?: failure.javaClass.simpleName)
+            fail(failureText(failure))
             system.invalidateFrames()
         } finally {
             try { renderer?.endFrame() } finally {
@@ -185,12 +199,24 @@ class CameraRuntime : AutoCloseable {
             ctx.gameRenderer().mainRenderTarget(), target.colorTextureView!!)
     }
 
-    private fun fail(message: String) {
-        lastError = message
+    private fun fail(detail: Component?) {
+        lastFailure = detail
+        lastError = detail?.string
+        if (detail == null) return
         Minecraft.getInstance().player?.sendSystemMessage(
-            Component.literal("[Differangle] 渲染暂停：$message 使用 /differangle mode ${mode.commandName} 重试。"),
+            Component.translatable("differangle.prefix").append(
+                Component.translatable("differangle.render.paused", detail, mode.commandName),
+            ),
         )
     }
+
+    /** Renderer failures arrive as exceptions; a missing embedded pipeline carries its own key. */
+    private fun failureText(failure: Exception): Component =
+        if (failure is EmbeddedNativePipelines.UnadaptedPipelineException) {
+            Component.translatable("differangle.render.pipeline", failure.pipeline().toString())
+        } else {
+            Component.literal(failure.message ?: failure.javaClass.simpleName)
+        }
 
     override fun close() { clear(); world = null }
 
@@ -204,3 +230,12 @@ class CameraRuntime : AutoCloseable {
         )
     }
 }
+
+/** Last frame's native feature counts, snapshot out of the renderer so commands can report them. */
+data class NativeFeatureTotals(
+    val entities: Int = 0,
+    val blockEntities: Int = 0,
+    val particles: Int = 0,
+    val weatherColumns: Int = 0,
+    val cloudViews: Int = 0,
+)

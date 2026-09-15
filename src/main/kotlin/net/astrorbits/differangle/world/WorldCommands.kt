@@ -1,90 +1,394 @@
 package net.astrorbits.differangle.world
 
+import com.mojang.brigadier.arguments.BoolArgumentType
+import com.mojang.brigadier.arguments.DoubleArgumentType
+import com.mojang.brigadier.arguments.FloatArgumentType
+import com.mojang.brigadier.arguments.IntegerArgumentType
 import com.mojang.brigadier.arguments.StringArgumentType
+import com.mojang.brigadier.builder.LiteralArgumentBuilder
+import com.mojang.brigadier.builder.RequiredArgumentBuilder
+import com.mojang.brigadier.context.CommandContext
+import com.mojang.brigadier.suggestion.SuggestionProvider
+import net.astrorbits.differangle.camera.Clickable
+import net.astrorbits.differangle.camera.Position
+import net.astrorbits.differangle.camera.Rotation
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
-import net.minecraft.commands.Commands
+import net.minecraft.ChatFormatting
 import net.minecraft.commands.CommandSourceStack
+import net.minecraft.commands.Commands
 import net.minecraft.core.BlockPos
 import net.minecraft.network.chat.Component
 import net.minecraft.server.permissions.Permissions
-import net.astrorbits.differangle.camera.*
+import java.util.Locale
 
+/**
+ * World side of `/differangle`.
+ *
+ * Every camera subcommand addresses one entity by UUID (short names are still accepted as a fallback).
+ * Each mutating subcommand is a real literal branch, so Brigadier parses, validates and completes it,
+ * and `camera list` prints clickable tokens that rebuild exactly those commands.
+ *
+ * All player-facing text comes from translation keys in `assets/differangle/lang`; nothing user-visible
+ * is written inline here, so a resource pack can retranslate the whole command surface.
+ */
 object WorldCommands {
+    /** Text for camera actions is shared with the client-only `copy` command's documentation. */
+    private const val KEY = "differangle.camera"
+
+    /** Tab completion for camera arguments: UUID first, then every camera name, so both target styles are visible. */
+    private val CAMERA_IDS: SuggestionProvider<CommandSourceStack> = SuggestionProvider { ctx, builder ->
+        val cameras = ctx.source.level.allEntities.filterIsInstance<CameraEntity>()
+        cameras.forEach { builder.suggest(it.uuid.toString()) }
+        cameras.mapNotNull { it.customName?.string }.distinct().forEach { builder.suggest(it) }
+        builder.buildFuture()
+    }
+
     fun register() {
         CommandRegistrationCallback.EVENT.register { dispatcher, _, _ ->
-            val root = Commands.literal("differangle").requires { it.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER) }
-                .executes { it.source.sendSuccess({ Component.literal(HELP) },false); 1 }
-            for (kind in listOf("camera","screen")) root.then(Commands.literal(kind)
-                .then(Commands.argument("options",StringArgumentType.greedyString()).executes { ctx ->
-                    try {
-                        val parts = StringArgumentType.getString(ctx,"options").trim().split(Regex("\\s+"))
-                        val message = if (kind == "camera") camera(ctx.source,parts) else screen(ctx.source,parts)
-                        ctx.source.sendSuccess({ Component.literal(message) },false)
-                        1
-                    } catch (ex: IllegalArgumentException) { ctx.source.sendFailure(Component.literal(ex.message ?: "参数无效")); 0 }
-                    catch (ex: IllegalStateException) { ctx.source.sendFailure(Component.literal(ex.message ?: "操作失败")); 0 }
-                    catch (_: IndexOutOfBoundsException) { ctx.source.sendFailure(Component.literal(HELP)); 0 }
-                }))
-            dispatcher.register(root)
+            dispatcher.register(root())
         }
     }
+
+    private fun root(): LiteralArgumentBuilder<CommandSourceStack> = Commands.literal("differangle")
+        .requires { it.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER) }
+        .executes { feedback(it, Component.translatable("differangle.help")) }
+        .then(camera())
+        .then(screen())
+
+    // ---------------------------------------------------------------- camera
+
+    private fun camera(): LiteralArgumentBuilder<CommandSourceStack> = Commands.literal("camera")
+        .executes { feedback(it, Component.translatable("$KEY.help")) }
+        .then(Commands.literal("list").executes { context -> respond(context) { cameraList(context) } })
+        .then(Commands.literal("create")
+            .then(Commands.argument("name", StringArgumentType.word())
+                .then(Commands.literal("invisible").executes { context -> respond(context) { createCamera(context, true) } })
+                .executes { context -> respond(context) { createCamera(context, false) } }))
+        .then(Commands.literal("status").then(id().executes { context -> respond(context) { cameraLine(camera(context)) } }))
+        .then(Commands.literal("remove").then(id().executes { context -> respond(context) {
+            val entity = camera(context)
+            CameraController.remove(context.source.level, entity.uuid.toString())
+            Component.translatable("$KEY.remove.done", handle(entity))
+        } }))
+        .then(Commands.literal("tp").then(id().executes { context -> respond(context) { teleport(context) } }))
+        .then(Commands.literal("enabled").then(id().then(Commands.argument("value", BoolArgumentType.bool())
+            .executes { context -> respond(context) {
+                val entity = camera(context)
+                entity.enabled = BoolArgumentType.getBool(context, "value")
+                cameraLine(entity)
+            } })))
+        .then(Commands.literal("invisible").then(id().then(Commands.argument("value", BoolArgumentType.bool())
+            .executes { context -> respond(context) {
+                val entity = camera(context)
+                entity.isInvisible = BoolArgumentType.getBool(context, "value")
+                cameraLine(entity)
+            } })))
+        .then(Commands.literal("fov").then(id().then(Commands.argument("value", FloatArgumentType.floatArg(1f, 179f))
+            .executes { context -> respond(context) {
+                val entity = camera(context)
+                entity.fov = FloatArgumentType.getFloat(context, "value")
+                cameraLine(entity)
+            } })))
+        .then(Commands.literal("fps").then(id().then(Commands.argument("value", IntegerArgumentType.integer(1, 240))
+            .executes { context -> respond(context) {
+                val entity = camera(context)
+                entity.fps = IntegerArgumentType.getInteger(context, "value")
+                cameraLine(entity)
+            } })))
+        .then(Commands.literal("near").then(id().then(Commands.argument("value", FloatArgumentType.floatArg(0.01f, 512f))
+            .executes { context -> respond(context) {
+                val entity = camera(context)
+                entity.nearPlane = FloatArgumentType.getFloat(context, "value")
+                cameraLine(entity)
+            } })))
+        .then(Commands.literal("far").then(id().then(Commands.argument("value", FloatArgumentType.floatArg(1f, 65536f))
+            .executes { context -> respond(context) {
+                val entity = camera(context)
+                entity.farPlane = FloatArgumentType.getFloat(context, "value")
+                cameraLine(entity)
+            } })))
+        .then(Commands.literal("pose")
+            .then(id().then(Commands.argument("x", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0))
+                .then(Commands.argument("y", DoubleArgumentType.doubleArg(-20_000_000.0, 20_000_000.0))
+                    .then(Commands.argument("z", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0))
+                        .then(Commands.argument("yaw", FloatArgumentType.floatArg(-360f, 360f))
+                            .then(Commands.argument("pitch", FloatArgumentType.floatArg(-90f, 90f))
+                                .then(Commands.argument("roll", FloatArgumentType.floatArg(-360f, 360f))
+                                    .then(tween { context, ticks, easing -> respond(context) { pose(context, ticks, easing) } })
+                                    .executes { context -> respond(context) { pose(context, 0, "linear") } }))))))))
+        .then(Commands.literal("move").then(id().then(coords { context -> respond(context) { pose(context, 0, "linear") } })))
+        .then(Commands.literal("look").then(id().then(angles { context -> respond(context) { pose(context, 0, "linear") } })))
+        // Kept for existing worlds, scripts and game tests: `camera <sub> <id> ...` in one greedy argument.
+        .then(Commands.argument("legacy", StringArgumentType.greedyString()).executes { legacy(it) })
+
+    /** Header line plus one clickable line per camera. */
+    private fun cameraList(context: CommandContext<CommandSourceStack>): Component {
+        val cameras = context.source.level.allEntities.filterIsInstance<CameraEntity>().sortedBy { it.uuid.toString() }
+        if (cameras.isEmpty()) return Component.translatable("$KEY.list.empty")
+        return Clickable.line(
+            Component.translatable("$KEY.list.header", cameras.size).withStyle(ChatFormatting.GRAY),
+            *cameras.map { entry(it) }.toTypedArray(),
+        )
+    }
+
+    private fun entry(entity: CameraEntity): Component {
+        val id = entity.uuid.toString()
+        return Clickable.line(
+            Clickable.copy(Component.translatable("$KEY.copy.name"), id, ChatFormatting.AQUA, Component.translatable("$KEY.copy.tip", id)),
+            Clickable.command(Component.translatable("$KEY.copy.button"), "/differangle camera copy $id", ChatFormatting.DARK_AQUA,
+                Component.translatable("$KEY.copy.tip", id)),
+            Clickable.command(Component.translatable("$KEY.enabled.state", entity.enabled), "/differangle camera enabled $id ${!entity.enabled}",
+                ChatFormatting.YELLOW, Component.translatable("$KEY.enabled.tip", !entity.enabled)),
+            Clickable.command(Component.translatable("$KEY.list.tp"), "/differangle camera tp $id", ChatFormatting.GREEN,
+                Component.translatable("$KEY.list.tp.tip")),
+            Clickable.command(Component.translatable("$KEY.list.remove"), "/differangle camera remove $id", ChatFormatting.RED,
+                Component.translatable("$KEY.list.remove.tip")),
+            Component.translatable(
+                "$KEY.list.body", id, entity.x.coord(), entity.y.coord(), entity.z.coord(),
+                Component.translatable(if (entity.isInvisible) "differangle.flag.no" else "differangle.flag.yes"), entity.fov.coord(), entity.fps,
+            ).withStyle(ChatFormatting.GRAY),
+        ).withStyle(if (entity.enabled) ChatFormatting.WHITE else ChatFormatting.DARK_GRAY)
+    }
+
+    private fun createCamera(context: CommandContext<CommandSourceStack>, invisible: Boolean): Component {
+        val player = context.source.playerOrException
+        val name = StringArgumentType.getString(context, "name")
+        val eye = player.eyePosition
+        val entity = CameraController.create(
+            context.source.level, name, Position(eye.x, eye.y, eye.z), Rotation.minecraftDegrees(player.yRot, player.xRot), invisible,
+        )
+        return Component.translatable("$KEY.create.done", name, handle(entity))
+    }
+
+    /** The name token copies the UUID, so every reply is a usable handle. */
+    private fun cameraLine(entity: CameraEntity): Component = Clickable.line(
+        Clickable.copy(Component.translatable("$KEY.copy.name"), uuid(entity), ChatFormatting.AQUA,
+            Component.translatable("$KEY.copy.tip", uuid(entity))),
+        Clickable.command(Component.translatable("$KEY.copy.button"), "/differangle camera copy ${uuid(entity)}", ChatFormatting.DARK_AQUA,
+            Component.translatable("$KEY.copy.tip", uuid(entity))),
+        Clickable.command(Component.translatable("$KEY.enabled.state", entity.enabled), "/differangle camera enabled ${uuid(entity)} ${!entity.enabled}",
+            ChatFormatting.YELLOW, Component.translatable("$KEY.enabled.tip", !entity.enabled)),
+        Component.translatable(
+            "$KEY.status.body", entity.x.coord(), entity.y.coord(), entity.z.coord(), entity.fov.coord(), entity.fps,
+            Component.translatable(if (entity.isInvisible) "differangle.flag.no" else "differangle.flag.yes"),
+        ).withStyle(ChatFormatting.GRAY),
+    )
+
+    private fun teleport(context: CommandContext<CommandSourceStack>): Component {
+        val player = context.source.playerOrException
+        val entity = camera(context)
+        val x = entity.x
+        val y = entity.y
+        val z = entity.z
+        player.teleportTo(x, y, z)
+        return Component.translatable("$KEY.tp.done", handle(entity))
+    }
+
+    private fun pose(context: CommandContext<CommandSourceStack>, ticks: Int, easing: String): Component {
+        val entity = camera(context)
+        val target = Position(double(context, "x"), double(context, "y"), double(context, "z"))
+        val rotation = Rotation.minecraftDegrees(float(context, "yaw"), float(context, "pitch"), float(context, "roll"))
+        CameraController.setPose(context.source.level, entity.uuid.toString(), target, rotation, ticks, easing)
+        val timing = if (ticks == 0) Component.translatable("$KEY.pose.immediate")
+        else Component.translatable("$KEY.pose.timed", ticks, Component.translatable("$KEY.pose.easing.$easing"))
+        val done = Component.translatable("$KEY.pose.done", timing, handle(entity))
+        return Clickable.line(done)
+    }
+
+    /** `Camera【name】` with the UUID as the copy payload. */
+    private fun handle(entity: CameraEntity): Component =
+        Clickable.copy(Component.translatable("$KEY.copy.name"), uuid(entity), ChatFormatting.AQUA,
+            Component.translatable("$KEY.copy.tip", uuid(entity)))
+
+    // ---------------------------------------------------------------- screen
+
+    private fun screen(): LiteralArgumentBuilder<CommandSourceStack> = Commands.literal("screen")
+        .executes { feedback(it, Component.translatable("differangle.screen.help")) }
+        .then(screenOp("bind") { handleScreen(it) })
+        .then(screenOp("enabled") { handleScreen(it) })
+        .then(screenOp("configure") { handleScreen(it) })
+        .then(screenOp("transform") { handleScreen(it) })
+        .then(screenOp("status") { handleScreen(it) })
+        // Submitted by the screen GUI; carries the revision guard, so no player-facing tab completion.
+        .then(Commands.literal("edit").then(Commands.argument("fields", StringArgumentType.greedyString())
+            .executes { handleScreen(it) }))
+
+    private fun screenOp(name: String, run: (CommandContext<CommandSourceStack>) -> Int): LiteralArgumentBuilder<CommandSourceStack> =
+        Commands.literal(name).then(Commands.argument("target", StringArgumentType.greedyString()).executes(run))
+
+    // ---------------------------------------------------------------- shared plumbing
+
+    private fun id(): RequiredArgumentBuilder<CommandSourceStack, String> =
+        Commands.argument("camera", StringArgumentType.word()).suggests(CAMERA_IDS)
+
+    private fun coords(run: (CommandContext<CommandSourceStack>) -> Int): RequiredArgumentBuilder<CommandSourceStack, Double> =
+        Commands.argument("x", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0))
+            .then(Commands.argument("y", DoubleArgumentType.doubleArg(-20_000_000.0, 20_000_000.0))
+                .then(Commands.argument("z", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0)).executes(run)))
+
+    private fun angles(run: (CommandContext<CommandSourceStack>) -> Int): RequiredArgumentBuilder<CommandSourceStack, Float> =
+        Commands.argument("yaw", FloatArgumentType.floatArg(-360f, 360f))
+            .then(Commands.argument("pitch", FloatArgumentType.floatArg(-90f, 90f))
+                .then(Commands.argument("roll", FloatArgumentType.floatArg(-360f, 360f)).executes(run)))
+
+    /** Optional tail of `pose`: an integer tick count followed by one of the three easing names. */
+    private fun tween(run: (CommandContext<CommandSourceStack>, Int, String) -> Int): RequiredArgumentBuilder<CommandSourceStack, Int> =
+        Commands.argument("ticks", IntegerArgumentType.integer(0, 72000))
+            .then(Commands.literal("step").executes { run(it, IntegerArgumentType.getInteger(it, "ticks"), "step") })
+            .then(Commands.literal("linear").executes { run(it, IntegerArgumentType.getInteger(it, "ticks"), "linear") })
+            .then(Commands.literal("smoothstep").executes { run(it, IntegerArgumentType.getInteger(it, "ticks"), "smoothstep") })
+            .executes { run(it, IntegerArgumentType.getInteger(it, "ticks"), "linear") }
+
+    private fun double(context: CommandContext<CommandSourceStack>, name: String) = DoubleArgumentType.getDouble(context, name)
+    private fun float(context: CommandContext<CommandSourceStack>, name: String) = FloatArgumentType.getFloat(context, name)
+
+    private fun camera(context: CommandContext<CommandSourceStack>): CameraEntity =
+        CameraController.find(context.source.level, StringArgumentType.getString(context, "camera"))
+
+    /** Keeps every branch honest: failures report the reason instead of the usage banner. */
+    private fun respond(context: CommandContext<CommandSourceStack>, body: () -> Component): Int = try {
+        context.source.sendSuccess({ body() }, false)
+        1
+    } catch (failure: IllegalArgumentException) {
+        context.source.sendFailure(reason(failure.message, "differangle.error.invalid")); 0
+    } catch (failure: IllegalStateException) {
+        context.source.sendFailure(reason(failure.message, "differangle.error.failed")); 0
+    }
+
+    /** Controller checks throw translation keys; anything else is passed through as literal text. */
+    private fun reason(message: String?, fallback: String): Component =
+        if (message == null) Component.translatable(fallback)
+        else if (message.startsWith(KEY) || message.startsWith("differangle.")) Component.translatable(message)
+        else Component.literal(message)
+
+    private fun feedback(context: CommandContext<CommandSourceStack>, message: Component): Int {
+        context.source.sendSuccess({ message }, false)
+        return 1
+    }
+
+    // ---------------------------------------------------------------- flags and legacy bridge
+
     private fun number(p: List<String>, index: Int) = p[index].toDouble().also { require(it.isFinite()) }
-    private fun angle(p: List<String>, index: Int) = number(p,index).toFloat().also { require(it.isFinite()) }
-    private fun bool(value: String) = value.toBooleanStrict()
-    private fun camera(source: CommandSourceStack, p: List<String>): String {
-        val level = source.level
-        if (p[0] == "list") return level.allEntities.filterIsInstance<CameraEntity>().joinToString("\n") { "${it.customName?.string}: ${it.uuid} enabled=${it.enabled}" }
-        if (p[0] == "create") {
-            val player = source.playerOrException
-            val eye = player.eyePosition
-            return CameraController.create(level,p[1],Position(eye.x,eye.y,eye.z),Rotation.minecraftDegrees(player.yRot,player.xRot),p.getOrNull(2)?.let(::bool) ?: true).uuid.toString()
-        }
-        val entity = CameraController.find(level,p[1])
-        when(p[0]) {
-            "remove" -> CameraController.remove(level,p[1])
-            "enabled" -> CameraController.setEnabled(level,p[1],bool(p[2]))
-            "invisible" -> CameraController.setInvisible(level,p[1],bool(p[2]))
-            "fov" -> entity.fov = angle(p,2)
-            "fps" -> entity.fps = p[2].toInt()
-            "pose", "move", "look" -> {
-                val position = if (p[0] == "look") Position(entity.x,entity.y,entity.z) else Position(number(p,2),number(p,3),number(p,4))
-                val rotation = when(p[0]) {
-                    "pose" -> Rotation.minecraftDegrees(angle(p,5),angle(p,6),angle(p,7))
-                    "look" -> Rotation.minecraftDegrees(angle(p,2),angle(p,3),angle(p,4))
-                    else -> entity.viewRotation
+    private fun angle(p: List<String>, index: Int) = number(p, index).toFloat().also { require(it.isFinite()) }
+    private fun flag(value: String) = value.toBooleanStrict()
+    private fun uuid(entity: CameraEntity) = entity.uuid.toString()
+    private fun Double.coord() = String.format(Locale.ROOT, "%.2f", this)
+    private fun Float.coord() = String.format(Locale.ROOT, "%.2f", this)
+
+    /**
+     * `camera <sub> <UUID> ...` as a single greedy string: the shape every existing script, world function
+     * and game test uses. The structured branches above always win when both could apply.
+     *
+     * `copy` exists only on the client, because the clipboard lives there.
+     */
+    private fun legacy(context: CommandContext<CommandSourceStack>): Int {
+        val source = context.source
+        val parts = StringArgumentType.getString(context, "legacy").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return feedback(context, Component.translatable("$KEY.help"))
+        return try {
+            when (parts[0]) {
+                "list" -> respond(context) { cameraList(context) }
+                "create" -> {
+                    require(parts.size >= 2) { "camera create <name> [true|false]" }
+                    val invisible = parts.getOrNull(2)?.let(::flag) ?: true
+                    val entity = CameraController.create(
+                        source.level, parts[1], Position(source.position.x, source.position.y, source.position.z),
+                        Rotation.minecraftDegrees(source.rotation.y, source.rotation.x), invisible,
+                    )
+                    respond(context) { Component.translatable("$KEY.create.done", parts[1], handle(entity)) }
                 }
-                val at = if (p[0] == "pose") 8 else 5
-                CameraController.setPose(level,p[1],position,rotation,p.getOrNull(at)?.toInt() ?: 0,p.getOrNull(at+1) ?: "linear")
+                else -> {
+                    require(parts.size >= 2) { "camera ${parts[0]} <UUID> ..." }
+                    val entity = CameraController.find(source.level, parts[1])
+                    when (parts[0]) {
+                        "remove" -> { CameraController.remove(source.level, uuid(entity)); respond(context) { cameraLine(entity) } }
+                        "enabled" -> { entity.enabled = flag(parts[2]); respond(context) { cameraLine(entity) } }
+                        "invisible" -> { entity.isInvisible = flag(parts[2]); respond(context) { cameraLine(entity) } }
+                        "fov" -> { entity.fov = angle(parts, 2); respond(context) { cameraLine(entity) } }
+                        "fps" -> { entity.fps = parts[2].toInt(); respond(context) { cameraLine(entity) } }
+                        "pose", "move", "look" -> {
+                            val position = if (parts[0] == "look") Position(entity.x, entity.y, entity.z) else Position(number(parts, 2), number(parts, 3), number(parts, 4))
+                            val rotation = when (parts[0]) {
+                                "pose" -> Rotation.minecraftDegrees(angle(parts, 5), angle(parts, 6), angle(parts, 7))
+                                "look" -> Rotation.minecraftDegrees(angle(parts, 2), angle(parts, 3), angle(parts, 4))
+                                else -> entity.viewRotation
+                            }
+                            val at = if (parts[0] == "pose") 8 else 5
+                            CameraController.setPose(
+                                source.level, uuid(entity), position, rotation,
+                                parts.getOrNull(at)?.toInt() ?: 0, parts.getOrNull(at + 1) ?: "linear",
+                            )
+                            respond(context) { cameraLine(entity) }
+                        }
+                        "status" -> respond(context) { cameraLine(entity) }
+                        "tp" -> {
+                            source.playerOrException.teleportTo(entity.x, entity.y, entity.z)
+                            respond(context) { Component.translatable("$KEY.tp.done", handle(entity)) }
+                        }
+                        else -> throw IllegalArgumentException("camera ${parts[0]}: ${Component.translatable("$KEY.help").string}")
+                    }
+                }
             }
-            "status" -> return "${entity.uuid}: ${entity.x}, ${entity.y}, ${entity.z}; FOV=${entity.fov}; FPS=${entity.fps}; enabled=${entity.enabled}"
-            else -> error(HELP)
+        } catch (failure: IllegalArgumentException) {
+            source.sendFailure(reason(failure.message, "differangle.error.invalid")); 0
+        } catch (failure: IllegalStateException) {
+            source.sendFailure(reason(failure.message, "differangle.error.failed")); 0
+        } catch (failure: IndexOutOfBoundsException) {
+            source.sendFailure(Component.translatable("$KEY.help")); 0
         }
-        return "摄像机已更新：${entity.uuid}"
     }
-    private fun screen(source: CommandSourceStack,raw: List<String>): String {
-        val pos = BlockPos(raw[1].toInt(),raw[2].toInt(),raw[3].toInt())
-        val entity = CameraController.screen(source.level,pos)
-        val p = if (raw[0] == "edit") {
-            require(raw[4] == entity.screenUuid.toString() && raw[5].toLong() == entity.revision) { "显示屏已被替换或修改，请重新打开设置" }
-            raw.take(4) + raw.drop(6)
-        } else raw
-        val old = entity.config
-        val updated = when(p[0]) {
-            "bind" -> old.copy(cameraUuid = if (p[4] == "none") null else ScreenConfig.uuid(p[4]) ?: error("无效的 Camera UUID"))
-            "enabled" -> old.copy(enabled = bool(p[4]))
-            "configure" -> old.copy(width=angle(p,4),height=angle(p,5),resX=p[6].toInt(),resY=p[7].toInt(),fps=p[8].toInt())
-            "transform" -> old.copy(offsetX=number(p,4),offsetY=number(p,5),offsetZ=number(p,6),yaw=angle(p,7),pitch=angle(p,8),roll=angle(p,9))
-            "edit" -> ScreenConfig(if (p[4] == "none") null else ScreenConfig.uuid(p[4]) ?: error("无效的 Camera UUID"),
-                angle(p,5),angle(p,6),p[7].toInt(),p[8].toInt(),p[9].toInt(),bool(p[10]),
-                number(p,11),number(p,12),number(p,13),angle(p,14),angle(p,15),angle(p,16),angle(p,17))
-            "status" -> return "Screen ${entity.screenUuid}: $old"
-            else -> error(HELP)
+
+    /** Flat argument lists submitted by commands and by the screen GUI, kept for world-function compatibility. */
+    private fun handleScreen(context: CommandContext<CommandSourceStack>): Int {
+        val source = context.source
+        val raw = StringArgumentType.getString(context, "target").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        return try {
+            when (raw[0]) {
+                "bind", "enabled", "configure", "transform", "status" -> {
+                    val required = when (raw[0]) {
+                        "bind", "enabled" -> 5
+                        "configure" -> 9
+                        "transform" -> 10
+                        else -> 4
+                    }
+                    require(raw.size >= required) { "screen ${raw[0]}" }
+                    val pos = BlockPos(raw[1].toInt(), raw[2].toInt(), raw[3].toInt())
+                    val entity = CameraController.screen(source.level, pos)
+                    val old = entity.config
+                    val updated = when (raw[0]) {
+                        "bind" -> old.copy(cameraUuid = if (raw[4] == "none") null else ScreenConfig.uuid(raw[4]) ?: error("bad camera UUID"))
+                        "enabled" -> old.copy(enabled = flag(raw[4]))
+                        "configure" -> old.copy(width = angle(raw, 4), height = angle(raw, 5), resX = raw[6].toInt(), resY = raw[7].toInt(), fps = raw[8].toInt())
+                        "transform" -> old.copy(offsetX = number(raw, 4), offsetY = number(raw, 5), offsetZ = number(raw, 6), yaw = angle(raw, 7), pitch = angle(raw, 8), roll = angle(raw, 9))
+                        "status" -> return feedback(context, Component.translatable("differangle.screen.status", entity.screenUuid.toString(), old.toString()))
+                        else -> error("screen ${raw[0]}")
+                    }
+                    CameraController.configure(source.level, pos, updated)
+                    feedback(context, Component.translatable("differangle.screen.updated", entity.screenUuid.toString()))
+                }
+                "edit" -> {
+                    require(raw.size >= 6) { "screen edit" }
+                    val pos = BlockPos(raw[1].toInt(), raw[2].toInt(), raw[3].toInt())
+                    val entity = CameraController.screen(source.level, pos)
+                    require(raw[4] == entity.screenUuid.toString() && raw[5].toLong() == entity.revision) { "screen revision" }
+                    val p = raw.take(4) + raw.drop(6)
+                    require(p.size >= 18) { "screen edit" }
+                    val updated = ScreenConfig(
+                        if (p[4] == "none") null else ScreenConfig.uuid(p[4]) ?: error("bad camera UUID"),
+                        angle(p, 5), angle(p, 6), p[7].toInt(), p[8].toInt(), p[9].toInt(), flag(p[10]),
+                        number(p, 11), number(p, 12), number(p, 13), angle(p, 14), angle(p, 15), angle(p, 16), angle(p, 17),
+                    )
+                    CameraController.configure(source.level, pos, updated)
+                    feedback(context, Component.translatable("differangle.screen.updated", entity.screenUuid.toString()))
+                }
+                else -> feedback(context, Component.translatable("differangle.screen.help"))
+            }
+        } catch (failure: IllegalArgumentException) {
+            source.sendFailure(reason(failure.message, "differangle.error.invalid")); 0
+        } catch (failure: IllegalStateException) {
+            source.sendFailure(reason(failure.message, "differangle.error.failed")); 0
+        } catch (failure: IndexOutOfBoundsException) {
+            source.sendFailure(Component.translatable("differangle.screen.help")); 0
         }
-        CameraController.configure(source.level,pos,updated)
-        return "显示屏已更新：${entity.screenUuid}"
     }
-    private const val HELP = "/differangle camera create <name> [invisible] | list | remove/enabled/invisible/fov/fps/status <UUID或名称> ...\n" +
-        "/differangle camera pose <id> <x y z yaw pitch roll> [ticks] [step|linear|smoothstep]\n" +
-        "/differangle camera move/look <id> <x y z或yaw pitch roll> [ticks] [easing]\n" +
-        "/differangle screen bind <x y z> <camera UUID|none> | configure <x y z> <width height resX resY fps> | transform <x y z> <offsetX offsetY offsetZ yaw pitch roll> | enabled <x y z> <true|false> | status <x y z>"
 }

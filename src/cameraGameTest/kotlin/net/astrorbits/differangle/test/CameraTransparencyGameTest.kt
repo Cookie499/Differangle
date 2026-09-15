@@ -82,7 +82,7 @@ class CameraTransparencyGameTest : FabricClientGameTest {
                         context.waitTicks(1)
                         context.runOnClient<RuntimeException> {
                             val runtime = DifferangleClient.runtime
-                            check(runtime.drawCalls == 0 || Regex("实体=(\\d+)").find(runtime.contentStatistics)!!.groupValues[1].toInt() > 0) {
+                            check(runtime.drawCalls == 0 || runtime.nativeFeatures.entities > 0) {
                                 "Remote entity disappeared at $name in $mode"
                             }
                         }

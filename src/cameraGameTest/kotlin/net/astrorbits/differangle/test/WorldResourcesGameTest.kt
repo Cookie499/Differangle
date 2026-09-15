@@ -8,6 +8,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext
 import net.minecraft.core.BlockPos
 import net.minecraft.core.component.DataComponents
+import net.minecraft.network.chat.Component
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.component.TypedEntityData
 
@@ -97,13 +98,13 @@ class WorldResourcesGameTest : FabricClientGameTest {
                 val entity=client.level!!.getBlockEntity(BlockPos(0,-59,4)) as ScreenBlockEntity
                 client.gui.setScreen(ScreenEditor(entity))
                 val editor=client.gui.screen()!!
-                editor.children().filterIsInstance<net.minecraft.client.gui.components.EditBox>().single { it.message.string == "宽度（格）" }.value="2.5"
+                editor.children().filterIsInstance<net.minecraft.client.gui.components.EditBox>().single { it.message == ScreenEditor.label("width") }.value="2.5"
             }
             context.waitTick()
             context.takeScreenshot("screen-editor-settings")
-            context.clickScreenButton("位置与旋转")
+            context.clickScreenButton(Component.translatable("differangle.screen.editor.page.transform").string)
             context.takeScreenshot("screen-editor-transform")
-            context.clickScreenButton("应用")
+            context.clickScreenButton(Component.translatable("differangle.screen.editor.apply").string)
             context.waitTicks(5)
             context.runOnClient<RuntimeException> { check(it.gui.screen() == null) }
             world.server.runOnServer<RuntimeException> { server ->
