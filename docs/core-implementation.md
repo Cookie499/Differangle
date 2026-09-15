@@ -8,7 +8,7 @@
 
 原因：补全用的是服务端命令树那一份命令表。Fabric 的 `ClientCommandInternals#addCommands` 复制客户端命令时先 `addChild`、之后才把子节点填进那份副本；Brigadier 遇到同名节点只做合并、不会替换，于是与服务端同名的 `differangle` 根节点（`WorldCommands` 注册）把整棵客户端子树丢掉了。`src/test` 的 `ClientCommandMergeTest` 固定了这条合并语义。
 
-修复：不注入 MC 内部。原版客户端命令表在每次收到命令包时都会被整体换成新实例，因此在已有的 `ClientTickEvents.END_CLIENT_TICK` 里对账 `player.connection.commands`，发现新实例就用完整副本重新合并客户端命令树（权限放开、命令改为空实现，只用于补全），最多晚 1 tick；同时给只输一半的客户端命令（`mode`、`layer`、`preview`、`preview camera|screen`）补上提示执行器，`/differangle mode` 不再报“错误的命令参数”，也不会被转发到服务端。
+修复：不注入 MC 内部。原版客户端命令表在每次收到命令包时都会被整体换成新实例，因此在已有的 `ClientTickEvents.END_CLIENT_TICK` 里对账 `player.connection.commands`，发现新实例就用完整副本重新合并本模组的 `differangle` 命令树（权限放开、命令改为空实现，只用于补全），不遍历或补入其他模组的根节点，最多晚 1 tick；同时给只输一半的客户端命令（`mode`、`layer`、`preview`、`preview camera|screen`）补上提示执行器，`/differangle mode` 不再报“错误的命令参数”，也不会被转发到服务端。
 
 验证：`./gradlew build` 通过（含新增测试）；重启客户端后 `/differangle` 补全应列出 `camera|screen|mode|layer|status|list|preview`。
 

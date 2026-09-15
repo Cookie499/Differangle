@@ -136,7 +136,7 @@ object CameraCommands {
     }
 
     /**
-     * 把客户端命令树合并进原版客户端命令表（聊天补全与用法提示用的那一份）。
+     * 只把本模组的 differangle 命令树合并进原版客户端命令表（聊天补全与用法提示用的那一份）。
      *
      * Fabric 也会在服务端命令树到达后做一次复制，但它是先 `addChild` 再填充子节点；Brigadier 遇到同名节点
      * 只做合并、不会替换，于是与服务端同名的 `differangle` 根节点（WorldCommands 注册）会把整棵客户端子树
@@ -155,8 +155,8 @@ object CameraCommands {
     private fun mergeInto(target: CommandDispatcher<FabricClientCommandSource>) {
         val source = clientDispatcher ?: return
         if (source === target) return
-        val root = target.root
-        for (child in source.root.children) root.addChild(completionCopy(child))
+        val modRoot = source.root.getChild("differangle") ?: return
+        target.root.addChild(completionCopy(modRoot))
     }
 
     /** 复制一份仅用于补全的节点：权限放开、命令为空实现，避免通过原版命令表重复执行。 */
