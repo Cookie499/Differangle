@@ -19,6 +19,6 @@ void main() {
 #ifdef EMBEDDED
     gl_Position = ProjMat * ScreenModelView * vec4(p * 0.5, 0.0, 1.0);
 #else
-    gl_Position = vec4(p, ViewOptions.x > 0.5 ? 0.0 : -1.0, 1.0);
+    gl_Position = vec4(p, ViewOptions.y > 0.5 ? 1.0 : (ViewOptions.x > 0.5 ? 0.0 : -1.0), 1.0);
 #endif
 }

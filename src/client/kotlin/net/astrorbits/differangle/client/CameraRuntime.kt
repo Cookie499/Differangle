@@ -7,6 +7,7 @@ import net.astrorbits.differangle.client.render.CameraWorldRenderer
 import net.astrorbits.differangle.client.render.CameraEnvironmentSampler
 import net.astrorbits.differangle.client.render.PreparedCameraView
 import net.astrorbits.differangle.client.render.TextureCameraBackend
+import net.astrorbits.differangle.client.render.compat.IrisCameraScope
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.Minecraft
@@ -44,6 +45,7 @@ class CameraRuntime : AutoCloseable {
     private val environments = CameraEnvironmentSampler()
     private var context: LevelRenderContext? = null
     private val prepared = mutableMapOf<String, PreparedCameraView>()
+    private var deferredContext: LevelRenderContext? = null
     private val logger = LoggerFactory.getLogger("Differangle")
 
     fun syncWorld(client: Minecraft) {
@@ -67,6 +69,7 @@ class CameraRuntime : AutoCloseable {
 
     /** F3+T and mode switches release resources while preserving Camera/Screen definitions. */
     fun reloadResources() {
+        deferredContext = null
         system.invalidateFrames()
         renderer?.close()
         renderer = null
@@ -84,16 +87,36 @@ class CameraRuntime : AutoCloseable {
     }
 
     fun compatibilityProblem(): String? {
-        val loaded = listOf("sodium", "iris").filter { FabricLoader.getInstance().isModLoaded(it) }
-        return if (loaded.isEmpty()) null else "当前原版网格后端尚不支持 ${loaded.joinToString()}，请在不含这些模组的实例测试。"
+        val loader = FabricLoader.getInstance()
+        for ((id, series) in listOf("sodium" to "0.9.", "iris" to "1.11.")) {
+            val installed = loader.getModContainer(id).orElse(null) ?: continue
+            val version = installed.metadata.version.friendlyString
+            if (!version.startsWith(series)) return "摄像机后端适配 $id ${series}x，当前安装的是 $version。"
+        }
+        return null
     }
 
     fun render(renderContext: LevelRenderContext) {
+        if (FabricLoader.getInstance().isModLoaded("iris") && IrisCameraScope.active()) {
+            if (!IrisCameraScope.shadowPass()) deferredContext = renderContext
+            return
+        }
+        renderNow(renderContext)
+    }
+
+    fun renderAfterLevel() {
+        val ctx = deferredContext ?: return
+        deferredContext = null
+        IrisCameraScope().use { renderNow(ctx) }
+    }
+
+    private fun renderNow(renderContext: LevelRenderContext) {
         val client = Minecraft.getInstance()
         syncWorld(client)
         if (world == null || (system.screens().isEmpty() && net.astrorbits.differangle.client.world.WorldClient.debugCameras.isEmpty()) || lastError != null) return
         compatibilityProblem()?.let { fail(it); return }
-        val dispatcher = renderContext.levelRenderer().sectionRenderDispatcher() ?: return
+        val dispatcher = renderContext.levelRenderer().sectionRenderDispatcher()
+        if (dispatcher == null && !FabricLoader.getInstance().isModLoaded("sodium")) return
         val camera = renderContext.levelState().cameraRenderState
         val origin = Position(camera.pos.x, camera.pos.y, camera.pos.z)
         val cameras = system.cameras().associateBy { it.id }
@@ -103,7 +126,7 @@ class CameraRuntime : AutoCloseable {
         val visible = surfaces.filter { it.enabled && cameras[it.cameraId]?.enabled == true }
         val start = System.nanoTime()
         context = renderContext
-        dispatcher.lock()
+        dispatcher?.lock()
         try {
             val gpu = renderer ?: CameraWorldRenderer(layers).also { renderer = it }
             gpu.beginFrame()
@@ -135,7 +158,7 @@ class CameraRuntime : AutoCloseable {
             try { renderer?.endFrame() } finally {
                 prepared.clear()
                 context = null
-                dispatcher.unlock()
+                dispatcher?.unlock()
                 cpuMillis = (System.nanoTime() - start) / 1_000_000.0
             }
         }
@@ -143,7 +166,7 @@ class CameraRuntime : AutoCloseable {
 
     private fun prepare(camera: CameraDefinition) = prepared.getOrPut(camera.id) {
         val client = Minecraft.getInstance()
-        val loadedDistance = ((context!!.levelRenderer().viewArea()?.viewDistance ?: 2) * 16).toFloat()
+        val loadedDistance = (client.options.effectiveRenderDistance * 16).toFloat()
         renderer!!.prepare(camera, context!!.levelRenderer(), environments.sample(world!!, camera,
             client.deltaTracker.getGameTimeDeltaPartialTick(false), loadedDistance))
     }

@@ -11,6 +11,6 @@ void differangleClipFragment() {
     float depth = ViewOptions.x > 0.5 ? ndc.z : ndc.z * 0.5 + 0.5;
     if (any(greaterThan(abs(ndc.xy), vec2(1.0))) || depth < 0.0 || depth > 1.0) discard;
     float sceneDepth = texelFetch(SceneDepth, ivec2(gl_FragCoord.xy), 0).r;
-    if (gl_FragCoord.z + 0.000001 < sceneDepth) discard;
+    if (ViewOptions.y > 0.5 ? gl_FragCoord.z - 0.000001 > sceneDepth : gl_FragCoord.z + 0.000001 < sceneDepth) discard;
     gl_FragDepth = depth;
 }

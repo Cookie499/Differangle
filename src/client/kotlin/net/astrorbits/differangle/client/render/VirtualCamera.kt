@@ -51,7 +51,7 @@ class VirtualCamera(val definition: CameraDefinition, level: ClientLevel) : Came
         it.xRot = xRot(); it.yRot = yRot()
         it.orientation.set(orientation)
         it.viewRotationMatrix.set(view)
-        it.projectionMatrix.set(definition.renderProjectionMatrix(zeroToOne))
+        it.projectionMatrix.set(net.astrorbits.differangle.client.render.compat.RendererCompatibility.projection(definition, zeroToOne))
         it.cullFrustum.set(frustum)
         it.depthFar = definition.farPlane
         it.hudFov = definition.fov

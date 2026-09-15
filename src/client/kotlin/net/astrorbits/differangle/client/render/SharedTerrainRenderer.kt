@@ -21,6 +21,9 @@ import java.nio.ByteBuffer
 import java.util.Optional
 import java.util.OptionalDouble
 import org.joml.Vector4f
+import com.mojang.blaze3d.vertex.VertexFormat
+import net.fabricmc.loader.api.FabricLoader
+import net.astrorbits.differangle.client.render.compat.SodiumTerrain
 
 /** Borrows vanilla compiled terrain buffers for one frame; never rebuilds or owns those buffers. */
 class SharedTerrainRenderer : CameraRenderStage {
@@ -31,6 +34,7 @@ class SharedTerrainRenderer : CameraRenderStage {
         val vertices: GpuBuffer, val indices: GpuBuffer?, val indexType: IndexType?,
         val firstIndex: Int, val indexCount: Int, val baseVertex: Int,
         val section: GpuBufferSlice, val cutout: Boolean, val translucent: Boolean, val distanceSquared: Double,
+        val sodiumFormat: VertexFormat? = null,
     )
     class PreparedTerrain(val camera: CameraDefinition, val draws: List<TerrainDraw>, val sections: Int,
                           val blockEntities: List<BlockEntity> = emptyList())
@@ -48,6 +52,11 @@ class SharedTerrainRenderer : CameraRenderStage {
 
     /** Caller holds SectionRenderDispatcher.lock across preparation AND execution for this frame. */
     fun prepare(camera: CameraDefinition, renderer: LevelRenderer, translucent: Boolean = true): PreparedTerrain {
+        if (FabricLoader.getInstance().isModLoaded("sodium")) {
+            return SodiumTerrain.prepare(camera, translucent) { x, y, z ->
+                sections.writeUniform(SectionUniform(Vector4f(x, y, z, 0f)))
+            }
+        }
         val area = renderer.viewArea() ?: return PreparedTerrain(camera, emptyList(), 0)
         val dispatcher = renderer.sectionRenderDispatcher() ?: return PreparedTerrain(camera, emptyList(), 0)
         val frustum = Frustum(camera.viewMatrix(), camera.projectionMatrix())
@@ -138,7 +147,7 @@ class SharedTerrainRenderer : CameraRenderStage {
                 pass.bindTexture("SceneDepth", output.mainDepth, sampler)
             }
             for (draw in draws) {
-                pass.setPipeline(when {
+                pass.setPipeline(if (draw.sodiumFormat != null) CameraPipelines.sodiumTerrain(draw.sodiumFormat, embedded, translucent, draw.cutout) else when {
                     embedded && translucent -> CameraPipelines.embeddedTranslucent
                     translucent -> CameraPipelines.textureTranslucent
                     embedded && draw.cutout -> CameraPipelines.embeddedCutout

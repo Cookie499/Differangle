@@ -9,6 +9,7 @@ import com.mojang.blaze3d.pipeline.RenderPipeline
 import com.mojang.blaze3d.platform.CompareOp
 import com.mojang.blaze3d.shaders.UniformType
 import com.mojang.blaze3d.vertex.DefaultVertexFormat
+import com.mojang.blaze3d.vertex.VertexFormat
 import net.minecraft.client.renderer.BindGroupLayouts
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.resources.Identifier
@@ -22,21 +23,30 @@ object CameraPipelines {
     private val surface = uniform("Surface")
     private val sceneDepth = BindGroupLayout.builder().withSampler("SceneDepth").build()
 
-    private fun terrain(embedded: Boolean, cutout: Boolean, translucent: Boolean = false): RenderPipeline {
+    private data class SodiumKey(val format: VertexFormat, val embedded: Boolean, val translucent: Boolean, val cutout: Boolean, val iris: Boolean)
+    private val sodiumPipelines = mutableMapOf<SodiumKey, RenderPipeline>()
+    fun sodiumTerrain(format: VertexFormat, embedded: Boolean, translucent: Boolean, cutout: Boolean): RenderPipeline {
+        val iris = net.astrorbits.differangle.client.render.compat.RendererCompatibility.shadersEnabled()
+        return sodiumPipelines.getOrPut(SodiumKey(format, embedded, translucent, cutout, iris)) { terrain(embedded, cutout, translucent, format, iris) }
+    }
+
+    private fun terrain(embedded: Boolean, cutout: Boolean, translucent: Boolean = false, sodiumFormat: VertexFormat? = null, iris: Boolean = false): RenderPipeline {
         val builder = RenderPipeline.builder()
-            .withLocation(id("pipeline/terrain_${embedded}_${cutout}_${translucent}"))
+            .withLocation(id("pipeline/terrain_${embedded}_${cutout}_${translucent}_${sodiumFormat?.vertexSize ?: 0}_$iris"))
             .withVertexShader(id("core/terrain"))
             .withFragmentShader(id("core/terrain"))
             .withBindGroupLayout(view).withBindGroupLayout(section).withBindGroupLayout(environment)
             .withBindGroupLayout(BindGroupLayouts.SAMPLER0_SAMPLER2)
-            .withVertexBinding(0, DefaultVertexFormat.BLOCK)
+            .withVertexBinding(0, sodiumFormat ?: DefaultVertexFormat.BLOCK)
             .withPrimitiveTopology(PrimitiveTopology.QUADS)
             .withDepthStencilState(DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, !translucent))
             // Embedded mapping can reverse winding when the screen is seen from the back.
             .withCull(!embedded)
         if (embedded) builder.withShaderDefine("EMBEDDED")
             .withBindGroupLayout(BindGroupLayouts.PROJECTION).withBindGroupLayout(sceneDepth)
-        if (cutout) builder.withShaderDefine("CUTOUT")
+        if (cutout && (sodiumFormat == null || iris)) builder.withShaderDefine("CUTOUT")
+        if (sodiumFormat != null) builder.withShaderDefine("SODIUM")
+        if (iris) builder.withShaderDefine("IRIS_TERRAIN")
         if (translucent) builder.withShaderDefine("TRANSLUCENT")
             .withColorTargetState(ColorTargetState(BlendFunction.TRANSLUCENT))
         return RenderPipelines.register(builder.build())

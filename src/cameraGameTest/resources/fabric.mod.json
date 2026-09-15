@@ -4,7 +4,7 @@
   "version": "1.0",
   "environment": "client",
   "entrypoints": {
-    "fabric-client-gametest": ["net.astrorbits.differangle.test.CameraContentGameTest", "net.astrorbits.differangle.test.WorldResourcesGameTest"]
+    "fabric-client-gametest": ["net.astrorbits.differangle.test.CameraContentGameTest", "net.astrorbits.differangle.test.WorldResourcesGameTest", "net.astrorbits.differangle.test.CameraTransparencyGameTest"]
   },
   "depends": { "differangle": "*", "fabric-client-gametest-api-v1": "*" }
 }

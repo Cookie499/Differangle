@@ -1,0 +1,25 @@
+# Sodium / Iris 渲染兼容
+
+适配 Minecraft 26.2，验证版本为 Sodium 0.9.1、Iris 1.11.2。两者均为可选模组，生产 jar 不包含它们；未安装时继续使用原版区块网格。
+
+## 渲染路径
+
+- Sodium：读取当前已上传的 region 顶点、索引缓冲区，按摄像机自己的视锥选择区块，不替换主视角的可见区块列表。支持 Texture、Embedded，以及实体、方块实体、粒子、天气和云。
+- Sodium 紧凑顶点格式：解码位置、纹理坐标、顶点颜色、光照和材质透明阈值。Iris 开启光影时读取实际扩展顶点格式，并处理其不同的材质/AO 字节含义。
+- Iris：在主世界的光影合成结束、手部渲染清除世界深度之前绘制显示屏。摄像机使用基础渲染；主画面继续使用用户选择的光影包。摄像机不会执行另一套光影包的阴影、反射或后处理。
+- Iris 1.11.2 开启光影后会将原版反向 Z 的深度比较、清屏值转换为正向 Z。因此摄像机投影、天空远平面和 Embedded 主场景遮挡判断同步采用正向深度。不能只关闭 Iris 的程序替换，否则玻璃、水及实体仍会被错误的深度测试挡住。
+- 摄像机绘制期间暂时关闭 Iris 的即时顶点格式扩展，完成或异常后恢复原值。资源重载和世界切换释放本模组资源；借用的 Sodium 缓冲区不由本模组销毁。
+
+## 范围与限制
+
+只读取客户端已经加载并完成网格编译的区块，不为远程摄像机请求额外区块。半透明区块间按摄像机距离排序；区块内部沿用 Sodium 上传的索引顺序，不改写其主视角排序缓冲区。复杂交叠透明面可能仍存在排序差异。
+
+Sodium 的三个私有字段访问集中在 `SodiumTerrain` 中；不是稳定的公开 API。运行时限制为 Sodium 0.9.x / Iris 1.11.x，其他系列需要重新检查格式及调用时序。
+
+## 构建与回归
+
+编译优先使用 `run/mods` 下上述精确版本的 jar。缺少本地 jar 时，从 Modrinth Maven 获取固定版本；依赖仅加入 `clientCompileOnly`。版本来源：[Sodium 0.9.1](https://modrinth.com/mod/sodium/version/mc26.2-0.9.1-fabric)、[Iris 1.11.2](https://modrinth.com/mod/iris/version/1.11.2%2B26.2-fabric)。
+
+`gradlew -PcameraGameTest build runCameraTest` 在 `build/camera-gametest` 内创建独立世界。测试所需模组放在该目录的 `mods` 中，光影包及配置也放在该目录；不使用 `run/saves`。
+
+`CameraTransparencyGameTest` 对玻璃和水分别测试 Texture / Embedded：切换半透明层，比较显示屏内部的截图像素，避免“提交了 draw call 但像素被深度测试丢弃”的假通过。安装 Iris 时还会关闭、重新开启光影，检查渲染恢复。其他客户端测试覆盖全部内容层、倾斜屏幕、主视角遮挡、玩家渲染、模式切换及世界资源/NBT。

@@ -15,13 +15,14 @@ import net.minecraft.world.level.dimension.DimensionType.Skybox
 import org.joml.Matrix4f
 import org.joml.Vector4f
 import java.nio.ByteBuffer
+import net.astrorbits.differangle.client.render.compat.RendererCompatibility
 
 /** Both output modes execute exactly the same ordered world-content stages. */
 class CameraWorldRenderer(private val layers: CameraLayers) : AutoCloseable {
     private class ViewUniform(val camera: Matrix4f, val screen: Matrix4f, val zeroToOne: Boolean) : DynamicUniformStorage.DynamicUniform {
         override fun write(buffer: ByteBuffer) {
             Std140Builder.intoBuffer(buffer).putMat4f(camera).putMat4f(screen)
-                .putVec4(Vector4f(if (zeroToOne) 1f else 0f, 0f, 0f, 0f))
+                .putVec4(Vector4f(if (zeroToOne) 1f else 0f, if (RendererCompatibility.shadersEnabled()) 1f else 0f, 0f, 0f))
         }
     }
     private class EnvironmentUniform(val e: CameraEnvironment, val sun: Vector4f, val moon: Vector4f) : DynamicUniformStorage.DynamicUniform {
@@ -57,7 +58,7 @@ class CameraWorldRenderer(private val layers: CameraLayers) : AutoCloseable {
         val client = Minecraft.getInstance()
         val zeroToOne = RenderSystem.getDevice().deviceInfo.isZZeroToOne
         val viewBuffer = views.writeUniform(ViewUniform(
-            view.camera.renderProjectionMatrix(zeroToOne).mul(view.camera.viewMatrix()), output.screenModelView, zeroToOne))
+            RendererCompatibility.projection(view.camera, zeroToOne).mul(view.camera.viewMatrix()), output.screenModelView, zeroToOne))
         val context = CameraDrawContext(view, output, viewBuffer,
             client.atlasManager.getAtlasOrThrow(AtlasIds.BLOCKS).textureView,
             client.gameRenderer.levelLightmap(), client.atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS).textureView,

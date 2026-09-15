@@ -41,6 +41,10 @@ fabricApi {
 }
 
 repositories {
+    exclusiveContent {
+        forRepository { maven { name = "Modrinth"; url = uri("https://api.modrinth.com/maven") } }
+        filter { includeGroup("maven.modrinth") }
+    }
     // Add repositories to retrieve artifacts from in here.
     // You should only use this when depending on other mods because
     // Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
@@ -49,6 +53,11 @@ repositories {
 }
 
 dependencies {
+    // Optional renderer API; the mod is never bundled or required at runtime.
+    val sodiumApi = fileTree("run/mods") { include("*sodium-fabric-0.9.1+mc26.2.jar") }
+    val irisApi = fileTree("run/mods") { include("iris-fabric-1.11.2+mc26.2.jar") }
+    "clientCompileOnly"(if (sodiumApi.isEmpty) "maven.modrinth:AANobbMI:2Yom1N68" else sodiumApi)
+    "clientCompileOnly"(if (irisApi.isEmpty) "maven.modrinth:YL57xq9U:oaD6KQls" else irisApi)
     // To change the versions see the gradle.properties file
     minecraft("com.mojang:minecraft:${project.property("minecraft_version")}")
     implementation("net.fabricmc:fabric-loader:${project.property("loader_version")}")

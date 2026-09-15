@@ -87,4 +87,4 @@ CameraEntity 持久化、Screen 基座方块、UUID 绑定、开关/黑屏、单
 
 自动化测试验证矩阵方向、FOV/裁剪面、远坐标精度、20 Screen 共用一个 Target、FPS 边界、调度公平性、隐藏/禁用过滤、失效/释放、异常恢复及递归保护。测试不需要启动 Minecraft 或 GPU。
 
-GPU 适配代码已按本地 26.2 API 编译验证，但尚未进行游戏内 GPU 验证。下一步是设计文档第 48 节的最小实验：通过一个已有区块的几何，完成独立 Camera → TextureTarget → 旋转 Quad，并验证主视角渲染状态恢复。几何共享、主视角可见性复用、Iris/Sodium、动态分辨率、关键帧与 Embedded 均不在本次实现范围内。
+GPU 路径已增加独立客户端集成测试，覆盖 Texture、Embedded、原版内容层和世界资源。Sodium / Iris 的接入方式、深度约定、验证版本及当前限制见[渲染兼容说明](render-compatibility.md)。
