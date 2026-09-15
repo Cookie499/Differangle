@@ -28,6 +28,33 @@ class WorldResourcesGameTest : FabricClientGameTest {
                 entity.uuid
             }
             context.waitFor({ DifferangleClient.runtime.statistics.screenDraws > 0 },400)
+            // Vanilla /data controls the same synced Entity flag as the mod's convenience command.
+            world.server.runCommand("data merge entity $uuid {Invisible:1b}")
+            context.waitFor({ client -> client.level!!.entitiesForRendering().filterIsInstance<CameraEntity>()
+                .any { it.uuid == uuid && it.isInvisible && it.enabled } },100)
+            world.server.runOnServer<RuntimeException> { server ->
+                val level = server.overworld()
+                val camera = CameraController.find(level, uuid.toString())
+                for (invisible in listOf(true, false)) {
+                    CameraController.setInvisible(level, uuid.toString(), invisible)
+                    val output = net.minecraft.world.level.storage.TagValueOutput.createWithContext(net.minecraft.util.ProblemReporter.DISCARDING, level.registryAccess())
+                    camera.saveWithoutId(output)
+                    val tag = output.buildResult()
+                    check(tag.getBooleanOr("Invisible", !invisible) == invisible)
+                    check(!tag.contains("invisible"))
+                    val restored = CameraEntity(WorldResources.cameraType, level)
+                    restored.load(net.minecraft.world.level.storage.TagValueInput.create(net.minecraft.util.ProblemReporter.DISCARDING, level.registryAccess(), tag))
+                    check(restored.isInvisible == invisible && restored.uuid == uuid)
+                    tag.remove("Invisible")
+                    restored.isInvisible = true
+                    restored.load(net.minecraft.world.level.storage.TagValueInput.create(net.minecraft.util.ProblemReporter.DISCARDING, level.registryAccess(), tag))
+                    check(!restored.isInvisible) { "Missing Invisible must use vanilla's false default" }
+                }
+            }
+            world.server.runCommand("data merge entity $uuid {Invisible:1b}")
+            world.server.runCommand("data remove entity $uuid Invisible")
+            context.waitFor({ client -> client.level!!.entitiesForRendering().filterIsInstance<CameraEntity>()
+                .any { it.uuid == uuid && !it.isInvisible && it.enabled } },100)
             context.takeScreenshot("persistent-screen-front")
             // Real /clone carries the entire NBT payload; only placed Screen identity changes.
             world.server.runCommand("clone 0 -59 4 0 -59 4 3 -59 4")

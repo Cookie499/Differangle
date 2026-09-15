@@ -100,7 +100,7 @@ Camera 与 Screen 都保存独立的 `enabled`。关闭不删除资源对象、�
 
 Camera 实体是可保存、可同步的功能实体，不代表可碰撞的世界对象：
 
-- 默认 `invisible = true`、无阴影、无碰撞、无重力、无选择框。
+- 创建指令默认显式设置原版 `Invisible = true`；NBT 缺省时按原版约定为 false。无阴影、无碰撞、无重力、无选择框。
 - 可选调试可见模式，显示轴线、视锥体、UUID 和路径关键帧。
 - 实体位置使用 Minecraft 世界坐标；旋转使用 yaw、pitch、roll，内部转换为规范化四元数。
 - 实体 UUID 是主标识。不要把实体名称作为关联键；名称可以重命名。
@@ -112,7 +112,7 @@ Camera 实体持久化字段建议：
 | --- | --- | --- |
 | `camera_uuid` | UUID | 稳定关联标识 |
 | `display_name` | string | UI/指令显示名称，不参与关联 |
-| `invisible` | bool | 是否隐藏调试实体 |
+| `Invisible` | bool | 原版实体 NBT 标签；使用原版隐形状态与同步逻辑控制调试外观，不另设小写字段 |
 | `enabled` | bool | Camera 总开关；关闭时停止所有视图更新并让绑定 Screen 黑屏 |
 | `position` | double[3] | 可选冗余；实体本身的坐标是权威值 |
 | `yaw`, `pitch`, `roll` | float | 角度，加载时规范化 |

@@ -33,6 +33,8 @@ Camera 和 Screen 由服务端保存并同步，单人与多人采用同一路�
 
 `/differangle camera invisible <id> false` 显示轴线、视锥及 UUID，摄像机仍然无碰撞、无选取、无重力和阴影。
 
+隐形使用原版实体的 `setInvisible` / `isInvisible` 和同步标志，NBT 字段为大小写敏感的 `Invisible`，不另存小写 `invisible`。例如 `/data merge entity <UUID> {Invisible:1b}` 隐藏，`{Invisible:0b}` 显示；移除或缺省该标签时按原版约定为 false。模组 `camera create` 指令默认显式设为 true；原版 `/summon differangle:camera` 未指定标签时可见。隐形仅控制实体调试外观，不关闭摄像机画面。
+
 客户端调试入口 `/differangle mode`、`layer`、`status`、`list` 保留。原有临时创建/编辑指令移至 `/differangle preview demo|camera|screen|clear`；这些预览不保存到世界。持久化命令使用 `/differangle camera` 与 `/differangle screen`。
 
 ## 生命周期

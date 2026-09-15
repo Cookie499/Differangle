@@ -12,7 +12,7 @@ import org.joml.Quaternionf
 
 /** Server entity pose is authoritative; client definitions are disposable projections. */
 class CameraEntity(type: EntityType<out CameraEntity>, level: Level) : Entity(type, level) {
-    init { noPhysics = true; setNoGravity(true); isInvisible = true }
+    init { noPhysics = true; setNoGravity(true) }
     var enabled: Boolean get() = entityData.get(ENABLED); set(value) { entityData.set(ENABLED, value) }
     var fov: Float get() = entityData.get(FOV); set(value) { require(value.isFinite() && value in 1f..179f); entityData.set(FOV, value) }
     var nearPlane: Float get() = entityData.get(NEAR); set(value) { require(value.isFinite() && value > 0f && value < farPlane); entityData.set(NEAR, value) }
@@ -51,6 +51,8 @@ class CameraEntity(type: EntityType<out CameraEntity>, level: Level) : Entity(ty
     override fun isPickable() = false
     override fun isPushable() = false
     override fun readAdditionalSaveData(input: ValueInput) {
+        // Entity owns the synced flag, but does not persist it. Match vanilla ArmorStand's NBT convention.
+        isInvisible = input.getBooleanOr("Invisible", false)
         enabled = input.getBooleanOr("enabled", true)
         fov = input.getFloatOr("fov",70f).takeIf { it.isFinite() && it in 1f..179f } ?: 70f
         fps = input.getIntOr("update_rate",15).coerceIn(1,240)
@@ -65,6 +67,7 @@ class CameraEntity(type: EntityType<out CameraEntity>, level: Level) : Entity(ty
         }.getOrNull()
     }
     override fun addAdditionalSaveData(out: ValueOutput) {
+        out.putBoolean("Invisible", isInvisible)
         out.putBoolean("enabled",enabled); out.putFloat("fov",fov); out.putFloat("near_plane",nearPlane); out.putFloat("far_plane",farPlane); out.putInt("update_rate",fps)
         writeRotation(out,"rotation",viewRotation)
         motion?.let { m ->
