@@ -13,6 +13,21 @@ import net.minecraft.world.item.component.TypedEntityData
 
 class WorldResourcesGameTest : FabricClientGameTest {
     override fun runTest(context: ClientGameTestContext) {
+        context.runOnClient<RuntimeException> {
+            val runtime = DifferangleClient.runtime
+            val original = runtime.mode
+            try {
+                for (mode in CameraMode.entries) {
+                    runtime.switchMode(mode)
+                    net.astrorbits.differangle.client.CameraRuntime().use { restored ->
+                        check(restored.mode == mode) { "Render mode was not restored from client config: $mode" }
+                    }
+                }
+                println("CONFIG PASS: both render modes survive runtime recreation")
+            } finally {
+                runtime.switchMode(original)
+            }
+        }
         context.worldBuilder().create().use { world ->
             world.server.runCommand("tp @a 0 -60 0 0 0")
             world.server.runCommand("fill -8 -61 0 8 -61 20 minecraft:stone")

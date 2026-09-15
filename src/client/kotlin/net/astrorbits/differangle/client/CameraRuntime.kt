@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory
 
 /** Owns one scene for the current client world, shared by both rendering algorithms. */
 class CameraRuntime : AutoCloseable {
+    private val config = ClientConfig()
     val system = CameraSystem(TextureCameraBackend(::drawTexture, ::drawSurface))
     val layers = CameraLayers()
     var contentStatistics = "本帧尚未更新摄像头"
@@ -28,7 +29,7 @@ class CameraRuntime : AutoCloseable {
         layers.set(layer, enabled)
         reloadResources()
     }
-    var mode = CameraMode.TEXTURE
+    var mode = config.loadMode()
         private set
     var lastError: String? = null
         private set
@@ -63,6 +64,7 @@ class CameraRuntime : AutoCloseable {
 
     fun switchMode(value: CameraMode) {
         RenderSystem.assertOnRenderThread()
+        config.saveMode(value)
         reloadResources()
         mode = value
     }

@@ -22,6 +22,8 @@
 
 ## 构建与回归
 
+客户端渲染模式保存在 `config/differangle.json` 的 `renderMode` 字段（`texture` / `embedded`）。`/differangle mode` 切换时立即写入，重启后恢复；配置缺失或模式无效时使用 `texture`。该选项跨世界生效，不写入屏幕 NBT。
+
 编译优先使用 `run/mods` 下上述精确版本的 jar。缺少本地 jar 时，从 Modrinth Maven 获取固定版本；依赖仅加入 `clientCompileOnly`。版本来源：[Sodium 0.9.1](https://modrinth.com/mod/sodium/version/mc26.2-0.9.1-fabric)、[Iris 1.11.2](https://modrinth.com/mod/iris/version/1.11.2%2B26.2-fabric)。
 
 `gradlew -PcameraGameTest build runCameraTest` 在 `build/camera-gametest` 内创建独立世界。测试所需模组放在该目录的 `mods` 中，光影包及配置也放在该目录；不使用 `run/saves`。
