@@ -61,6 +61,58 @@ class CameraTransparencyGameTest : FabricClientGameTest {
                     context.takeScreenshot("iris-toggle-$enabled")
                 }
             }
+            world.server.runCommand("fill -6 -60 18 6 -58 30 minecraft:air")
+            world.server.runCommand("summon minecraft:pig 0.5 -60 26 {NoAI:1b,NoGravity:1b,Invulnerable:1b}")
+            world.server.runCommand("fill -2 -60 28 2 -58 28 minecraft:red_concrete")
+            context.waitTicks(40)
+            context.runOnClient<RuntimeException> {
+                DifferangleClient.runtime.setLayer(CameraLayer.ENTITIES, true)
+            }
+            for ((name, z, yaw) in listOf(Triple("close", 0.8, 0f), Triple("side", 4.0, 75f), Triple("edge", 4.0, 85f))) {
+                val images = mutableListOf<java.awt.image.BufferedImage>()
+                context.runOnClient<RuntimeException> {
+                    val runtime = DifferangleClient.runtime
+                    runtime.system.putScreen(runtime.system.screens().single().copy(position = Position(0.5, -58.38, z), rotation = Rotation.minecraftDegrees(yaw, 0f)))
+                    runtime.system.putCamera(runtime.system.cameras().single().copy(resolution = Resolution(1024, 576)))
+                }
+                for (mode in CameraMode.entries) {
+                    context.runOnClient<RuntimeException> { DifferangleClient.runtime.switchMode(mode) }
+                    awaitDraw(context)
+                    repeat(8) {
+                        context.waitTicks(1)
+                        context.runOnClient<RuntimeException> {
+                            val runtime = DifferangleClient.runtime
+                            check(runtime.drawCalls == 0 || Regex("实体=(\\d+)").find(runtime.contentStatistics)!!.groupValues[1].toInt() > 0) {
+                                "Remote entity disappeared at $name in $mode"
+                            }
+                        }
+                    }
+                    images += ImageIO.read(context.takeScreenshot("view-$name-${mode.commandName}").toFile())
+                }
+                val corners = context.computeOnClient<List<org.joml.Vector2f>, RuntimeException> { client ->
+                    val state = client.gameRenderer.gameRenderState().levelRenderState.cameraRenderState
+                    val screen = DifferangleClient.runtime.system.screens().single()
+                    val matrix = org.joml.Matrix4f(state.projectionMatrix).mul(state.viewRotationMatrix)
+                        .mul(screen.modelMatrix(Position(state.pos.x, state.pos.y, state.pos.z)))
+                    listOf(-0.5f to -0.5f, 0.5f to -0.5f, 0.5f to 0.5f, -0.5f to 0.5f).map { (x, y) ->
+                        val p = matrix.transform(org.joml.Vector4f(x, y, 0f, 1f))
+                        org.joml.Vector2f((p.x / p.w * 0.5f + 0.5f) * images[0].width, (0.5f - p.y / p.w * 0.5f) * images[0].height)
+                    }
+                }
+                var sampled = 0; var different = 0
+                for (y in images[0].height / 10 until images[0].height * 7 / 10) for (x in 0 until images[0].width) {
+                    val signs = corners.indices.map { i ->
+                        val a = corners[i]; val b = corners[(i + 1) % 4]
+                        (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x)
+                    }
+                    if (!(signs.all { it > 10f } || signs.all { it < -10f })) continue
+                    sampled++
+                    val a = images[0].getRGB(x, y); val b = images[1].getRGB(x, y)
+                    if (listOf(0, 8, 16).sumOf { kotlin.math.abs(((a ushr it) and 255) - ((b ushr it) and 255)) } > 80) different++
+                }
+                check(sampled > 200 && different < sampled * 0.15) { "$name: Texture / Embedded disagree at $different / $sampled screen pixels" }
+                println("VIEW PASS $name: $different / $sampled different screen pixels")
+            }
             context.runOnClient<RuntimeException> {
                 DifferangleClient.runtime.clear()
                 CameraLayer.entries.forEach { DifferangleClient.runtime.setLayer(it, true) }

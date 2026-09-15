@@ -144,7 +144,7 @@ class SharedTerrainRenderer : CameraRenderStage {
             pass.setUniform("CameraEnvironment", context.view.environmentUniform)
             if (embedded) {
                 pass.setUniform("Projection", NativeCameraScope.mainProjection())
-                pass.bindTexture("SceneDepth", output.mainDepth, sampler)
+                pass.bindTexture("ScreenVisibility", output.screenVisibility, sampler)
             }
             for (draw in draws) {
                 pass.setPipeline(if (draw.sodiumFormat != null) CameraPipelines.sodiumTerrain(draw.sodiumFormat, embedded, translucent, draw.cutout) else when {

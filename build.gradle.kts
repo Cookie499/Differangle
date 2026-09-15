@@ -76,7 +76,7 @@ tasks.test {
 if (providers.gradleProperty("cameraGameTest").isPresent) {
     val cameraTest = sourceSets.create("cameraGameTest") {
         compileClasspath += sourceSets.main.get().output + sourceSets["client"].output + sourceSets["client"].compileClasspath
-        runtimeClasspath += output + compileClasspath + sourceSets["client"].runtimeClasspath
+        runtimeClasspath += sourceSets.main.get().output + sourceSets["client"].output + sourceSets["client"].runtimeClasspath
     }
     loom.mods.register("differangle_test") { sourceSet(cameraTest) }
     loom.runs.register("cameraTest") {

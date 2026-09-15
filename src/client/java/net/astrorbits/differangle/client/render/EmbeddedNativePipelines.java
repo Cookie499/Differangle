@@ -21,7 +21,7 @@ public final class EmbeddedNativePipelines extends RenderPipeline {
     private static final Map<RenderPipeline, RenderPipeline> VARIANTS = new IdentityHashMap<>();
     private static final BindGroupLayout EMBEDDED = BindGroupLayout.builder()
         .withUniform("CameraView", UniformType.UNIFORM_BUFFER)
-        .withUniform("MainProjection", UniformType.UNIFORM_BUFFER).withSampler("SceneDepth").build();
+        .withUniform("MainProjection", UniformType.UNIFORM_BUFFER).withSampler("ScreenVisibility").build();
 
     private EmbeddedNativePipelines(RenderPipeline original) {
         super(Identifier.fromNamespaceAndPath("differangle", "embedded/" + original.getLocation().getPath()),

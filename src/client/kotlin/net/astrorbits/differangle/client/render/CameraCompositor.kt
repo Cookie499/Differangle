@@ -24,6 +24,8 @@ class CameraCompositor : AutoCloseable {
     private val surfaces = DynamicUniformStorage<SurfaceUniform>("Differangle surfaces", 80, 512)
     private var embeddedDepth: GpuTexture? = null
     private var embeddedDepthView: GpuTextureView? = null
+    private var visibility: GpuTexture? = null
+    private var visibilityView: GpuTextureView? = null
     private var depthWidth = 0
     private var depthHeight = 0
 
@@ -36,9 +38,21 @@ class CameraCompositor : AutoCloseable {
     fun embedded(screen: ScreenDefinition, origin: Position, mainView: Matrix4f, target: RenderTarget): CameraRenderOutput {
         ensureDepth(target.width, target.height)
         RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(embeddedDepth!!, 0.0)
+        val modelView = Matrix4f(mainView).mul(screen.modelMatrix(origin))
+        // Test exactly the same physical quad as the screen's depth prepass. Camera triangles
+        // must not compare their independently interpolated plane depth against that same plane.
+        RenderSystem.getDevice().createCommandEncoder().createRenderPass(
+            { "Differangle screen visibility ${screen.id}" }, visibilityView!!, Optional.of(Vector4f()),
+            target.depthTextureView!!, OptionalDouble.empty(),
+        ).use { pass ->
+            pass.setPipeline(CameraPipelines.visibilitySurface)
+            pass.setUniform("Projection", RenderSystem.getProjectionMatrixBuffer()!!)
+            pass.setUniform("Surface", surfaces.writeUniform(SurfaceUniform(modelView, Vector4f(1f))))
+            pass.draw(6, 1, 0, 0)
+        }
         return CameraRenderOutput(target.colorTextureView!!, embeddedDepthView!!, target.depthTextureView!!,
-            Matrix4f(mainView).mul(screen.modelMatrix(origin)),
-            BorrowedCameraTarget(target.colorTextureView!!, embeddedDepthView!!, target.width, target.height))
+            modelView,
+            BorrowedCameraTarget(target.colorTextureView!!, embeddedDepthView!!, target.width, target.height), visibilityView)
     }
 
     fun surface(screen: ScreenDefinition, origin: Position, mainView: Matrix4f, target: RenderTarget, color: GpuTextureView) {
@@ -68,8 +82,10 @@ class CameraCompositor : AutoCloseable {
     }
 
     private fun ensureDepth(width: Int, height: Int) {
-        if (embeddedDepth != null && width == depthWidth && height == depthHeight) return
+        if (embeddedDepth != null && visibilityView != null && width == depthWidth && height == depthHeight) return
         embeddedDepthView?.close(); embeddedDepth?.close()
+        visibilityView?.close(); visibility?.close()
+        visibilityView = null; visibility = null
         embeddedDepthView = null; embeddedDepth = null
         val device = RenderSystem.getDevice()
         val texture = device.createTexture("Differangle embedded depth",
@@ -77,6 +93,11 @@ class CameraCompositor : AutoCloseable {
         try { embeddedDepthView = device.createTextureView(texture) }
         catch (failure: Exception) { texture.close(); throw failure }
         embeddedDepth = texture
+        val mask = device.createTexture("Differangle screen visibility",
+            GpuTexture.USAGE_RENDER_ATTACHMENT or GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.R8_UNORM, width, height, 1, 1)
+        try { visibilityView = device.createTextureView(mask) }
+        catch (failure: Exception) { mask.close(); throw failure }
+        visibility = mask
         depthWidth = width; depthHeight = height
     }
 
@@ -84,6 +105,8 @@ class CameraCompositor : AutoCloseable {
     override fun close() {
         surfaces.close()
         embeddedDepthView?.close(); embeddedDepth?.close()
+        visibilityView?.close(); visibility?.close()
+        visibilityView = null; visibility = null
         embeddedDepthView = null; embeddedDepth = null
     }
 }

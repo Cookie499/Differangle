@@ -21,7 +21,7 @@ object CameraPipelines {
     private val environment = uniform("CameraEnvironment")
     private val section = uniform("SectionOffset")
     private val surface = uniform("Surface")
-    private val sceneDepth = BindGroupLayout.builder().withSampler("SceneDepth").build()
+    private val screenVisibility = BindGroupLayout.builder().withSampler("ScreenVisibility").build()
 
     private data class SodiumKey(val format: VertexFormat, val embedded: Boolean, val translucent: Boolean, val cutout: Boolean, val iris: Boolean)
     private val sodiumPipelines = mutableMapOf<SodiumKey, RenderPipeline>()
@@ -40,10 +40,10 @@ object CameraPipelines {
             .withVertexBinding(0, sodiumFormat ?: DefaultVertexFormat.BLOCK)
             .withPrimitiveTopology(PrimitiveTopology.QUADS)
             .withDepthStencilState(DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, !translucent))
-            // Embedded mapping can reverse winding when the screen is seen from the back.
-            .withCull(!embedded)
+            // Screens are front-facing only; preserve the camera's own back-face rejection.
+            .withCull(true)
         if (embedded) builder.withShaderDefine("EMBEDDED")
-            .withBindGroupLayout(BindGroupLayouts.PROJECTION).withBindGroupLayout(sceneDepth)
+            .withBindGroupLayout(BindGroupLayouts.PROJECTION).withBindGroupLayout(screenVisibility)
         if (cutout && (sodiumFormat == null || iris)) builder.withShaderDefine("CUTOUT")
         if (sodiumFormat != null) builder.withShaderDefine("SODIUM")
         if (iris) builder.withShaderDefine("IRIS_TERRAIN")
@@ -52,13 +52,14 @@ object CameraPipelines {
         return RenderPipelines.register(builder.build())
     }
 
-    private fun surface(textured: Boolean): RenderPipeline {
+    private fun surface(textured: Boolean, visibility: Boolean = false): RenderPipeline {
         val builder = RenderPipeline.builder()
-            .withLocation(id("pipeline/surface_$textured"))
+            .withLocation(id(if (visibility) "pipeline/screen_visibility" else "pipeline/surface_$textured"))
             .withVertexShader(id("core/surface")).withFragmentShader(id("core/surface"))
             .withBindGroupLayout(surface).withBindGroupLayout(BindGroupLayouts.PROJECTION)
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-            .withDepthStencilState(DepthStencilState.DEFAULT).withCull(true)
+            .withDepthStencilState(if (visibility) DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false) else DepthStencilState.DEFAULT).withCull(true)
+        if (visibility) builder.withColorTargetState(ColorTargetState(java.util.Optional.empty(), com.mojang.blaze3d.GpuFormat.R8_UNORM, ColorTargetState.WRITE_RED))
         if (textured) builder.withShaderDefine("TEXTURED").withBindGroupLayout(BindGroupLayouts.SAMPLER0)
         return RenderPipelines.register(builder.build())
     }
@@ -71,6 +72,7 @@ object CameraPipelines {
     val embeddedTranslucent = terrain(true, false, true)
     val texturedSurface = surface(true)
     val backgroundSurface = surface(false)
+    val visibilitySurface = surface(false, true)
     private fun sky(embedded: Boolean): RenderPipeline {
         val builder = RenderPipeline.builder()
             .withLocation(id("pipeline/sky_$embedded"))

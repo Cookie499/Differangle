@@ -59,7 +59,7 @@ class NativeCameraScope(output: RenderTarget, camera: Camera, projection: GpuBuf
             pass.setPipeline(EmbeddedNativePipelines.variant(pipeline))
             pass.setUniform("CameraView", scope.drawContext.viewUniform)
             pass.setUniform("MainProjection", requireNotNull(scope.oldProjection))
-            pass.bindTexture("SceneDepth", requireNotNull(scope.drawContext.output.mainDepth),
+            pass.bindTexture("ScreenVisibility", requireNotNull(scope.drawContext.output.screenVisibility),
                 RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST))
         }
     }

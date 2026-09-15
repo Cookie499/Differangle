@@ -21,6 +21,7 @@ data class CameraRenderOutput(
     val mainDepth: GpuTextureView? = null,
     val screenModelView: Matrix4f = Matrix4f(),
     val target: RenderTarget? = null,
+    val screenVisibility: GpuTextureView? = null,
 ) { val embedded get() = mainDepth != null }
 
 data class CameraDrawContext(
