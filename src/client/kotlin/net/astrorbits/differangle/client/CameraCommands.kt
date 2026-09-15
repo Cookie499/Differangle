@@ -1,5 +1,6 @@
 package net.astrorbits.differangle.client
 
+import com.mojang.brigadier.CommandDispatcher
 import com.mojang.brigadier.arguments.DoubleArgumentType
 import com.mojang.brigadier.arguments.BoolArgumentType
 import com.mojang.brigadier.arguments.FloatArgumentType
@@ -7,19 +8,28 @@ import com.mojang.brigadier.arguments.IntegerArgumentType
 import com.mojang.brigadier.arguments.StringArgumentType
 import com.mojang.brigadier.builder.ArgumentBuilder
 import com.mojang.brigadier.context.CommandContext
+import com.mojang.brigadier.tree.CommandNode
 import net.astrorbits.differangle.camera.*
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
+import net.minecraft.client.Minecraft
 import net.minecraft.network.chat.Component
 import java.util.Locale
 
 object CameraCommands {
+    /** Fabric 交给客户端的命令表；补全用的原版命令表需要从这里再合并一次，见 [syncCompletion]。 */
+    private var clientDispatcher: CommandDispatcher<FabricClientCommandSource>? = null
+
+    /** 已经合并过的那份原版命令表；客户端每次收到命令包都会整体换新实例。 */
+    private var completionTarget: CommandDispatcher<FabricClientCommandSource>? = null
+
     fun register(runtime: CameraRuntime) {
         ClientCommandRegistrationCallback.EVENT.register { dispatcher, _ ->
+            clientDispatcher = dispatcher
             val root = literal("differangle").executes { ctx -> feedback(ctx, HELP) }
-            val preview = literal("preview")
+            val preview = literal("preview").executes { ctx -> feedback(ctx, PREVIEW_HELP) }
             // Fabric owns this client root. Explicitly forward world commands so its parser
             // cannot swallow server subcommands (including edits submitted by the screen GUI).
             for (kind in listOf("camera", "screen")) {
@@ -29,7 +39,7 @@ object CameraCommands {
                     1
                 }))
             }
-            val mode = literal("mode")
+            val mode = literal("mode").executes { ctx -> run(ctx, runtime) { modeSummary(runtime) } }
             CameraMode.entries.forEach { selected ->
                 mode.then(literal(selected.commandName).executes { ctx -> run(ctx, runtime) {
                     runtime.compatibilityProblem()?.let { error(it) }
@@ -39,7 +49,7 @@ object CameraCommands {
                 } })
             }
             root.then(mode)
-            val layer = literal("layer")
+            val layer = literal("layer").executes { ctx -> run(ctx, runtime) { layerSummary(runtime) } }
             CameraLayer.entries.forEach { selected ->
                 layer.then(literal(selected.commandName).then(argument("enabled", BoolArgumentType.bool()).executes { ctx -> run(ctx, runtime) {
                     runtime.setLayer(selected, BoolArgumentType.getBool(ctx, "enabled"))
@@ -72,7 +82,7 @@ object CameraCommands {
                 "已创建 $cameraId → $screenId，屏幕位于前方 4 格。移动或转身可观察独立视角；/differangle mode texture|embedded 切换。"
             } })
 
-            val camera = literal("camera")
+            val camera = literal("camera").executes { ctx -> feedback(ctx, PREVIEW_CAMERA_HELP) }
             camera.then(literal("here").then(argument("id", StringArgumentType.word()).executes { ctx -> run(ctx, runtime) {
                 val id = word(ctx, "id")
                 val old = runtime.system.cameras().find { it.id == id }
@@ -100,7 +110,7 @@ object CameraCommands {
             } }))
             preview.then(camera)
 
-            val screen = literal("screen")
+            val screen = literal("screen").executes { ctx -> feedback(ctx, PREVIEW_SCREEN_HELP) }
             screen.then(literal("add").then(argument("id", StringArgumentType.word()).then(argument("camera", StringArgumentType.word())
                 .suggests { _, builder -> runtime.system.cameras().forEach { builder.suggest(it.id) }; builder.buildFuture() }
                 .executes { ctx -> run(ctx, runtime) {
@@ -123,6 +133,40 @@ object CameraCommands {
             root.then(preview)
             dispatcher.register(root)
         }
+    }
+
+    /**
+     * 把客户端命令树合并进原版客户端命令表（聊天补全与用法提示用的那一份）。
+     *
+     * Fabric 也会在服务端命令树到达后做一次复制，但它是先 `addChild` 再填充子节点；Brigadier 遇到同名节点
+     * 只做合并、不会替换，于是与服务端同名的 `differangle` 根节点（WorldCommands 注册）会把整棵客户端子树
+     * 丢掉，`mode`/`layer`/`status`/`list`/`preview` 便不会出现在补全里。命令本身仍能执行，因为 Fabric 用
+     * 独立的 activeDispatcher 执行客户端命令。这里在命令表换成新实例后重新合并一份完整副本。
+     */
+    fun syncCompletion(client: Minecraft) {
+        val connection = client.player?.connection ?: return
+        @Suppress("UNCHECKED_CAST")
+        val target = connection.commands as CommandDispatcher<FabricClientCommandSource>
+        if (target === completionTarget) return
+        completionTarget = target
+        mergeInto(target)
+    }
+
+    private fun mergeInto(target: CommandDispatcher<FabricClientCommandSource>) {
+        val source = clientDispatcher ?: return
+        if (source === target) return
+        val root = target.root
+        for (child in source.root.children) root.addChild(completionCopy(child))
+    }
+
+    /** 复制一份仅用于补全的节点：权限放开、命令为空实现，避免通过原版命令表重复执行。 */
+    private fun completionCopy(node: CommandNode<FabricClientCommandSource>): CommandNode<FabricClientCommandSource> {
+        val builder = node.createBuilder()
+        builder.requires { true }
+        if (builder.command != null) builder.executes { 0 }
+        val copy = builder.build()
+        for (child in node.children) copy.addChild(completionCopy(child))
+        return copy
     }
 
     private fun cameraId(runtime: CameraRuntime) = argument("id", StringArgumentType.word()).suggests { _, builder ->
@@ -160,6 +204,10 @@ object CameraCommands {
         return ScreenDefinition(id, camera, Position(position.x, position.y, position.z), Rotation.minecraftDegrees(p.yRot, p.xRot))
     }
     private fun unusedId(base: String, existing: List<String>) = generateSequence(1) { it + 1 }.map { "${base}_$it" }.first { it !in existing }
+    private fun modeSummary(runtime: CameraRuntime) =
+        "当前模式=${runtime.mode.commandName}；可选：${CameraMode.entries.joinToString("|") { it.commandName }}。"
+    private fun layerSummary(runtime: CameraRuntime) =
+        "图层 ${runtime.layers.summary()}\n用法：/differangle layer <${CameraLayer.entries.joinToString("|") { it.commandName }}> <true|false>"
     private fun run(ctx: CommandContext<FabricClientCommandSource>, runtime: CameraRuntime, action: () -> String): Int = try {
         runtime.syncWorld(ctx.source.client)
         feedback(ctx, action())
@@ -171,4 +219,11 @@ object CameraCommands {
     private const val HELP = "世界资源：/differangle camera create <name> | camera list | screen bind <x y z> <UUID>；右键显示屏基座打开设置。\n" +
         "本地渲染：/differangle mode texture|embedded；layer <图层> <true|false>；status；list。\n" +
         "临时原型：/differangle preview demo|clear|camera|screen ...（不保存）。"
+    private const val PREVIEW_HELP = "临时原型（不写入世界）：\n" +
+        "demo 生成一组临时 Camera/Screen；clear 清空；\n" +
+        "camera here|remove|fov|fps|resolution|pose ...；screen add|remove|size|pose ..."
+    private const val PREVIEW_CAMERA_HELP = "临时 Camera：here <id> | remove <id> | fov <id> <1-179> | fps <id> <1-240> | " +
+        "resolution <id> <宽> <高> | pose <id> <x y z yaw pitch roll>"
+    private const val PREVIEW_SCREEN_HELP = "临时 Screen：add <id> <cameraId> | remove <id> | size <id> <宽> <高> | " +
+        "pose <id> <x y z yaw pitch roll>"
 }

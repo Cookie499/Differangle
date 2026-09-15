@@ -17,7 +17,7 @@ class DifferangleClient : ClientModInitializer {
         net.astrorbits.differangle.client.render.EmbeddedNativePipelines.initialize()
         CameraCommands.register(runtime)
         net.astrorbits.differangle.client.world.WorldClient.initialize()
-        ClientTickEvents.END_CLIENT_TICK.register { runtime.tick(it) }
+        ClientTickEvents.END_CLIENT_TICK.register { runtime.tick(it); CameraCommands.syncCompletion(it) }
         LevelRenderEvents.AFTER_SOLID_FEATURES.register { runtime.render(it) }
         ClientLifecycleEvents.CLIENT_STOPPING.register { runtime.close() }
         ResourceLoader.get(PackType.CLIENT_RESOURCES).registerReloadListener(

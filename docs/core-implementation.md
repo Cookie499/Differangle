@@ -2,6 +2,16 @@
 
 > 当前第 3–5 步（半透明地形、普通实体/方块实体、粒子/天气/云）的实现与验证见 [内容渲染说明](render-content.md)。下面的阶段记录反映各阶段当时的状态。
 
+## 2026-09-15 客户端命令补全修复
+
+现象：`/differangle` 的客户端命令在聊天里能执行（Fabric 用独立的客户端命令表执行），但 Tab 补全里看不到 `mode`/`layer`/`status`/`list`/`preview`。
+
+原因：补全用的是服务端命令树那一份命令表。Fabric 的 `ClientCommandInternals#addCommands` 复制客户端命令时先 `addChild`、之后才把子节点填进那份副本；Brigadier 遇到同名节点只做合并、不会替换，于是与服务端同名的 `differangle` 根节点（`WorldCommands` 注册）把整棵客户端子树丢掉了。`src/test` 的 `ClientCommandMergeTest` 固定了这条合并语义。
+
+修复：不注入 MC 内部。原版客户端命令表在每次收到命令包时都会被整体换成新实例，因此在已有的 `ClientTickEvents.END_CLIENT_TICK` 里对账 `player.connection.commands`，发现新实例就用完整副本重新合并客户端命令树（权限放开、命令改为空实现，只用于补全），最多晚 1 tick；同时给只输一半的客户端命令（`mode`、`layer`、`preview`、`preview camera|screen`）补上提示执行器，`/differangle mode` 不再报“错误的命令参数”，也不会被转发到服务端。
+
+验证：`./gradlew build` 通过（含新增测试）；重启客户端后 `/differangle` 补全应列出 `camera|screen|mode|layer|status|list|preview`。
+
 ## 2026-09-13 屏幕消失修复
 
 排查发现分阶段渲染重构未接通：`CameraRuntime` 仍调用 `SharedTerrainRenderer` 的旧方法，其中 `texture` 只清空 Target，`surface` 与 `embedded` 是空方法，因此没有异常也不会显示屏幕。
