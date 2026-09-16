@@ -12,6 +12,8 @@ import com.mojang.brigadier.suggestion.SuggestionProvider
 import net.astrorbits.differangle.camera.Clickable
 import net.astrorbits.differangle.camera.Position
 import net.astrorbits.differangle.camera.Rotation
+import net.astrorbits.differangle.media.AudioAttenuation
+import net.astrorbits.differangle.media.MediaSourceType
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.minecraft.ChatFormatting
 import net.minecraft.commands.CommandSourceStack
@@ -240,6 +242,9 @@ object WorldCommands {
         .then(screenOp("transform"))
         .then(screenOp("status"))
         .then(screenOp("mirror"))
+        .then(screenOp("source"))
+        .then(screenOp("audio"))
+        .then(screenOp("playback"))
         // Submitted by the screen GUI; the payload carries the revision guard, so it has no tab completion.
         .then(screenOp("edit"))
 
@@ -391,14 +396,18 @@ object WorldCommands {
         return try {
             val raw = listOf(op) + StringArgumentType.getString(context, SCREEN_PAYLOAD).trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
             when (op) {
-                "bind", "enabled", "configure", "transform", "status", "mirror" -> {
+                "bind", "enabled", "configure", "transform", "status", "mirror", "source", "audio", "playback" -> {
                     val required = when (op) {
                         "bind", "enabled", "mirror" -> 5
                         "configure" -> 9
                         "transform" -> 10
+                        "audio" -> 8
+                        "playback" -> 7
+                        "source" -> -1
                         else -> 4
                     }
-                    require(raw.size == required) { "screen $op" }
+                    if (op == "source") require(raw.size in 5..6) { "screen source <x> <y> <z> <camera|bilibili|video|image> [url]" }
+                    else require(raw.size == required) { "screen $op" }
                     val pos = BlockPos(raw[1].toInt(), raw[2].toInt(), raw[3].toInt())
                     val entity = CameraController.screen(source.level, pos)
                     val old = entity.config
@@ -406,6 +415,21 @@ object WorldCommands {
                         "bind" -> old.copy(cameraUuid = if (raw[4] == "none") null else ScreenConfig.uuid(raw[4]) ?: error("bad camera UUID"))
                         "enabled" -> old.copy(enabled = flag(raw[4]))
                         "mirror" -> old.copy(mirror = flag(raw[4]))
+                        "source" -> {
+                            val type = MediaSourceType.parse(raw[4])
+                            require(raw.size == if (type.isMedia) 6 else 5) {
+                                "screen source <x> <y> <z> <camera|bilibili|video|image> [url]"
+                            }
+                            val url = raw.getOrNull(5) ?: ""
+                            old.copy(media = old.media.copy(sourceType = type, sourceUrl = url))
+                        }
+                        "audio" -> old.copy(media = old.media.copy(
+                            audioEnabled = flag(raw[4]), volume = raw[5].toFloat(),
+                            attenuation = AudioAttenuation.parse(raw[6]), audibleDistance = raw[7].toFloat(),
+                        ))
+                        "playback" -> old.copy(media = old.media.copy(
+                            playing = flag(raw[4]), loop = flag(raw[5]), positionSeconds = raw[6].toDouble(),
+                        ))
                         "configure" -> old.copy(width = angle(raw, 4), height = angle(raw, 5), resX = raw[6].toInt(), resY = raw[7].toInt(), fps = raw[8].toInt())
                         "transform" -> old.copy(offsetX = number(raw, 4), offsetY = number(raw, 5), offsetZ = number(raw, 6), yaw = angle(raw, 7), pitch = angle(raw, 8), roll = angle(raw, 9))
                         "status" -> return feedback(context, Component.translatable("differangle.screen.status", entity.screenUuid.toString(), old.toString()))
@@ -426,6 +450,7 @@ object WorldCommands {
                         angle(p, 5), angle(p, 6), p[7].toInt(), p[8].toInt(), p[9].toInt(), flag(p[10]),
                         number(p, 11), number(p, 12), number(p, 13), angle(p, 14), angle(p, 15), angle(p, 16), angle(p, 17),
                         p.getOrNull(18)?.let(::flag) ?: entity.config.mirror,
+                        entity.config.media,
                     )
                     CameraController.configure(source.level, pos, updated)
                     feedback(context, Component.translatable("differangle.screen.updated", entity.screenUuid.toString()))

@@ -293,5 +293,5 @@ object CameraCommands {
     private val CAMERA_SUBCOMMANDS = listOf(
         "list", "create", "status", "remove", "tp", "enabled", "invisible", "fov", "fps", "near", "far", "pose", "move", "look",
     )
-    private val SCREEN_SUBCOMMANDS = listOf("bind", "enabled", "configure", "transform", "status", "mirror")
+    private val SCREEN_SUBCOMMANDS = listOf("bind", "enabled", "configure", "transform", "status", "mirror", "source", "audio", "playback")
 }

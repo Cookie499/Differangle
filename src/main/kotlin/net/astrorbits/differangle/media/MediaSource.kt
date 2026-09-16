@@ -1,0 +1,92 @@
+package net.astrorbits.differangle.media
+
+import java.net.URI
+import java.util.Locale
+
+enum class MediaSourceType(val serializedName: String) {
+    CAMERA("camera"),
+    BILIBILI("bilibili"),
+    VIDEO("video"),
+    IMAGE("image");
+
+    val isMedia: Boolean get() = this != CAMERA
+
+    companion object {
+        fun parse(value: String): MediaSourceType = entries.firstOrNull {
+            it.serializedName == value.lowercase(Locale.ROOT)
+        } ?: throw IllegalArgumentException("Unknown screen source type: $value")
+    }
+}
+
+enum class AudioAttenuation(val serializedName: String) {
+    NONE("none"),
+    LINEAR("linear");
+
+    companion object {
+        fun parse(value: String): AudioAttenuation = entries.firstOrNull {
+            it.serializedName == value.lowercase(Locale.ROOT)
+        } ?: throw IllegalArgumentException("Unknown audio attenuation: $value")
+    }
+}
+
+/** Network-safe, persistent settings. Login cookies and resolved temporary URLs never belong here. */
+data class MediaConfig(
+    val sourceType: MediaSourceType = MediaSourceType.CAMERA,
+    val sourceUrl: String = "",
+    val playing: Boolean = true,
+    val loop: Boolean = false,
+    val positionSeconds: Double = 0.0,
+    val audioEnabled: Boolean = true,
+    val volume: Float = 1.0f,
+    val attenuation: AudioAttenuation = AudioAttenuation.LINEAR,
+    val audibleDistance: Float = 32.0f,
+    val maxVideoHeight: Int = 720,
+) {
+    init {
+        require(sourceUrl.length <= MAX_URL_LENGTH) { "Media URL is too long" }
+        require(positionSeconds.isFinite() && positionSeconds >= 0.0) { "Invalid media position" }
+        require(volume.isFinite() && volume in 0f..1f) { "Invalid media volume" }
+        require(audibleDistance.isFinite() && audibleDistance in 1f..256f) { "Invalid audible distance" }
+        require(maxVideoHeight in 144..4320) { "Invalid maximum video height" }
+        if (sourceType.isMedia) {
+            require(sourceUrl.isNotBlank()) { "Media URL is required" }
+            MediaUrls.requireHttp(sourceUrl)
+        }
+        if (sourceType == MediaSourceType.BILIBILI) {
+            require(MediaUrls.isBilibili(sourceUrl)) { "Not a Bilibili video URL" }
+        }
+    }
+
+    companion object {
+        const val MAX_URL_LENGTH = 2048
+    }
+}
+
+object MediaUrls {
+    private val imageExtensions = setOf("png", "jpg", "jpeg", "webp")
+
+    fun requireHttp(value: String): URI {
+        val uri = runCatching { URI(value.trim()) }
+            .getOrElse { throw IllegalArgumentException("Invalid media URL", it) }
+        require(uri.scheme?.lowercase(Locale.ROOT) in setOf("http", "https")) { "Media URL must use HTTP or HTTPS" }
+        require(!uri.host.isNullOrBlank() && uri.userInfo == null) { "Invalid media URL host" }
+        return uri
+    }
+
+    fun isBilibili(value: String): Boolean {
+        val host = runCatching { requireHttp(value).host.lowercase(Locale.ROOT) }.getOrNull() ?: return false
+        return host == "bilibili.com" || host.endsWith(".bilibili.com") || host == "b23.tv" || host.endsWith(".b23.tv")
+    }
+
+    /** Best-effort editor convenience. Explicit source selection remains available for extensionless URLs. */
+    fun detect(value: String): MediaSourceType? {
+        val uri = runCatching { requireHttp(value) }.getOrNull() ?: return null
+        if (isBilibili(value)) return MediaSourceType.BILIBILI
+        val extension = uri.path.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        return when {
+            extension == "mp4" -> MediaSourceType.VIDEO
+            extension in imageExtensions -> MediaSourceType.IMAGE
+            else -> null
+        }
+    }
+}

@@ -64,7 +64,8 @@ class ScreenEditor(private val entity: ScreenBlockEntity) : Screen(Component.tra
             val binding = values.getValue("camera").trim()
             val config = ScreenConfig(
                 if (binding.isEmpty()) null else ScreenConfig.uuid(binding) ?: throw IllegalArgumentException("differangle.error.uuid"),
-                f("width"),f("height"),i("resX"),i("resY"),i("fps"),enabled,d("x"),d("y"),d("z"),f("yaw"),f("pitch"),f("roll"),f("depth"),mirror)
+                f("width"),f("height"),i("resX"),i("resY"),i("fps"),enabled,d("x"),d("y"),d("z"),f("yaw"),f("pitch"),f("roll"),f("depth"),mirror,
+                entity.config.media)
             check(minecraft.level === entity.level && !entity.isRemoved) { "differangle.error.screen.unloaded" }
             val p = entity.blockPos
             val args = listOf(config.cameraUuid ?: "none",config.width,config.height,config.resX,config.resY,config.fps,config.enabled,
