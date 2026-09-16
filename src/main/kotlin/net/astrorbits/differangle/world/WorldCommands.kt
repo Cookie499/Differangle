@@ -145,8 +145,8 @@ object WorldCommands {
     private fun entry(entity: CameraEntity): Component {
         val id = entity.uuid.toString()
         return Clickable.line(
-            Clickable.copy(Component.translatable("$KEY.copy.name"), id, ChatFormatting.AQUA, Component.translatable("$KEY.copy.tip", id)),
-            Clickable.command(Component.translatable("$KEY.copy.button"), "/differangle camera copy $id", ChatFormatting.DARK_AQUA,
+            Clickable.copy(Component.translatable("$KEY.copy.name", entity.customName?.string ?: entity.uuid.toString()), id, ChatFormatting.AQUA, Component.translatable("$KEY.copy.tip", id)),
+            Clickable.command(Component.translatable("$KEY.copy.button"), "/differangle copy $id", ChatFormatting.DARK_AQUA,
                 Component.translatable("$KEY.copy.tip", id)),
             Clickable.command(Component.translatable("$KEY.enabled.state", entity.enabled), "/differangle camera enabled $id ${!entity.enabled}",
                 ChatFormatting.YELLOW, Component.translatable("$KEY.enabled.tip", !entity.enabled)),
@@ -173,9 +173,9 @@ object WorldCommands {
 
     /** The name token copies the UUID, so every reply is a usable handle. */
     private fun cameraLine(entity: CameraEntity): Component = Clickable.line(
-        Clickable.copy(Component.translatable("$KEY.copy.name"), uuid(entity), ChatFormatting.AQUA,
+        Clickable.copy(Component.translatable("$KEY.copy.name", entity.customName?.string ?: entity.uuid.toString()), uuid(entity), ChatFormatting.AQUA,
             Component.translatable("$KEY.copy.tip", uuid(entity))),
-        Clickable.command(Component.translatable("$KEY.copy.button"), "/differangle camera copy ${uuid(entity)}", ChatFormatting.DARK_AQUA,
+        Clickable.command(Component.translatable("$KEY.copy.button"), "/differangle copy ${uuid(entity)}", ChatFormatting.DARK_AQUA,
             Component.translatable("$KEY.copy.tip", uuid(entity))),
         Clickable.command(Component.translatable("$KEY.enabled.state", entity.enabled), "/differangle camera enabled ${uuid(entity)} ${!entity.enabled}",
             ChatFormatting.YELLOW, Component.translatable("$KEY.enabled.tip", !entity.enabled)),
@@ -227,7 +227,7 @@ object WorldCommands {
 
     /** `Camera【name】` with the UUID as the copy payload. */
     private fun handle(entity: CameraEntity): Component =
-        Clickable.copy(Component.translatable("$KEY.copy.name"), uuid(entity), ChatFormatting.AQUA,
+        Clickable.copy(Component.translatable("$KEY.copy.name", entity.customName?.string ?: entity.uuid.toString()), uuid(entity), ChatFormatting.AQUA,
             Component.translatable("$KEY.copy.tip", uuid(entity)))
 
     // ---------------------------------------------------------------- screen
@@ -397,7 +397,7 @@ object WorldCommands {
                         "transform" -> 10
                         else -> 4
                     }
-                    require(raw.size >= required) { "screen $op" }
+                    require(raw.size == required) { "screen $op" }
                     val pos = BlockPos(raw[1].toInt(), raw[2].toInt(), raw[3].toInt())
                     val entity = CameraController.screen(source.level, pos)
                     val old = entity.config
@@ -418,7 +418,7 @@ object WorldCommands {
                     val entity = CameraController.screen(source.level, pos)
                     require(raw[4] == entity.screenUuid.toString() && raw[5].toLong() == entity.revision) { "screen revision" }
                     val p = raw.take(4) + raw.drop(6)
-                    require(p.size >= 18) { "screen edit" }
+                    require(p.size == 18) { "screen edit" }
                     val updated = ScreenConfig(
                         if (p[4] == "none") null else ScreenConfig.uuid(p[4]) ?: error("bad camera UUID"),
                         angle(p, 5), angle(p, 6), p[7].toInt(), p[8].toInt(), p[9].toInt(), flag(p[10]),

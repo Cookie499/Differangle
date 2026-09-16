@@ -38,7 +38,7 @@
 
 `gradlew -PcameraGameTest -PcameraShaderTest build runCameraTest` 选择光影专项测试：双摄像机、光影与基础画面的像素对比、修改分辨率、重建摄像机资源、Iris 开关及清理后主画面恢复。测试目录需同时安装 Sodium + Iris，并启用光影包。
 
-试验版已用 BSL 10.1.5 和 Complementary Reimagined 5.9 验证上述光影流程，并人工检查截图。标准回归的原版内容渲染测试通过，但整套测试在 `WorldResourcesGameTest` 的 GUI 编辑同步断言处失败，不能宣称完整回归通过。
+试验版已用 BSL 10.1.5 和 Complementary Reimagined 5.9 验证上述光影流程，并人工检查截图。GUI 编辑参数名修复后，已补测 GUI 写回、`move`/`look` 保留另一部分姿态，以及同一摄像机的 Embedded 屏幕独立宽高比。
 
 `CameraTransparencyGameTest` 对玻璃和水分别测试 Texture / Embedded：切换半透明层，比较显示屏内部的截图像素，避免“提交了 draw call 但像素被深度测试丢弃”的假通过。安装 Iris 时还会关闭、重新开启光影，检查渲染恢复。其他客户端测试覆盖全部内容层、倾斜屏幕、主视角遮挡、玩家渲染、模式切换及世界资源/NBT。
 

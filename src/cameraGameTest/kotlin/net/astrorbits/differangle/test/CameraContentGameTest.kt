@@ -134,8 +134,19 @@ class CameraContentGameTest : FabricClientGameTest {
             context.runOnClient<RuntimeException> {
                 check(DifferangleClient.runtime.lastError == null)
                 check(NativeCameraScope.target == null)
-                DifferangleClient.runtime.clear()
+                val runtime = DifferangleClient.runtime
+                val screen = runtime.system.screens().single()
+                runtime.system.putScreen(screen.copy(resolution = Resolution(512, 512)))
+                runtime.system.putScreen(screen.copy(id = "aspect-second", position = screen.position.copy(x = screen.position.x + 1.0),
+                    resolution = Resolution(512, 256)))
             }
+            context.waitFor({
+                val runtime = DifferangleClient.runtime
+                check(runtime.lastError == null) { runtime.lastError!! }
+                runtime.statistics.screenDraws == 2 && runtime.statistics.cameraUpdates == 2
+            }, 400)
+            context.takeScreenshot("camera-independent-embedded-aspects")
+            context.runOnClient<RuntimeException> { DifferangleClient.runtime.clear() }
         }
     }
 

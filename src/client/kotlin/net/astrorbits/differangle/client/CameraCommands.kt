@@ -35,6 +35,7 @@ object CameraCommands {
     fun register(runtime: CameraRuntime) {
         ClientCommandRegistrationCallback.EVENT.register { dispatcher, _ ->
             clientDispatcher = dispatcher
+            completionTarget = null
             val root = literal("differangle").executes { ctx -> feedback(ctx, text("differangle.help")) }
             val preview = literal("preview").executes { ctx -> feedback(ctx, text("differangle.preview.help")) }
             // Fabric owns this client root. Explicitly forward world commands so its parser
@@ -42,8 +43,13 @@ object CameraCommands {
             // The suggestion list is what makes `/differangle camera <TAB>` readable; the server
             // tree is merged separately by `syncCompletion` and supplies the argument values.
             for (kind in listOf("camera", "screen")) {
-                root.then(literal(kind).then(argument("worldOptions", StringArgumentType.greedyString())
-                    .suggests { _, builder -> worldSubcommands(kind).forEach { builder.suggest(it) }; builder.buildFuture() }
+                root.then(literal(kind).executes { ctx -> feedback(ctx, text("differangle.$kind.help")) }
+                    .then(argument("worldOptions", StringArgumentType.greedyString())
+                    .suggests { _, builder ->
+                        if (!builder.remaining.contains(' ')) worldSubcommands(kind)
+                            .filter { it.startsWith(builder.remainingLowerCase) }.forEach { builder.suggest(it) }
+                        builder.buildFuture()
+                    }
                     .executes { ctx -> forward(ctx, kind) }))
             }
             // The clipboard belongs to the client, so the tokens printed by the server's `camera list` run this.
@@ -158,6 +164,13 @@ object CameraCommands {
                 runtime.system.removeScreen(id)
                 text("differangle.preview.screen.remove.done")
             } }))
+            screen.then(literal("resolution").then(screenId(runtime)
+                .then(argument("width", IntegerArgumentType.integer(16, 4096))
+                    .then(argument("height", IntegerArgumentType.integer(16, 4096)).executes { ctx -> run(ctx, runtime) {
+                        runtime.system.putScreen(getScreen(ctx, runtime).copy(resolution = Resolution(
+                            IntegerArgumentType.getInteger(ctx, "width"), IntegerArgumentType.getInteger(ctx, "height"))))
+                        text("differangle.preview.screen.resolution.done")
+                    } }))))
             screen.then(literal("size").then(screenId(runtime).then(argument("width", FloatArgumentType.floatArg(0.1f, 128f))
                 .then(argument("height", FloatArgumentType.floatArg(0.1f, 128f)).executes { ctx -> run(ctx, runtime) {
                     runtime.system.putScreen(getScreen(ctx, runtime).copy(
@@ -222,11 +235,11 @@ object CameraCommands {
 
     /** Hands the world half of the command to the server; only that side has the entities. */
     private fun forward(ctx: CommandContext<FabricClientCommandSource>, kind: String): Int {
-        val rest = word(ctx, "worldOptions").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val rest = word(ctx, "worldOptions").trim()
         if (rest.isEmpty()) return feedback(ctx, text("differangle.$kind.help"))
-        ctx.source.client.connection?.send(
-            net.minecraft.network.protocol.game.ServerboundChatCommandPacket("differangle $kind ${rest.joinToString(" ")}"),
-        )
+        val connection = ctx.source.client.connection ?: return 0
+        // sendCommand re-enters Fabric's client dispatcher and would recursively execute this branch.
+        connection.send(net.minecraft.network.protocol.game.ServerboundChatCommandPacket("differangle $kind $rest"))
         return 1
     }
 

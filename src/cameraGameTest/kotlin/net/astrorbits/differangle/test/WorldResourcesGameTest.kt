@@ -122,6 +122,22 @@ class WorldResourcesGameTest : FabricClientGameTest {
             world.server.runCommand("differangle camera move $uuid 2 -58.4 6 10 smoothstep")
             context.waitTicks(15)
             world.server.runOnServer<RuntimeException> { server -> check(kotlin.math.abs(CameraController.find(server.overworld(),uuid.toString()).x-2.0)<1e-6) }
+            val position = world.server.computeOnServer<Position,RuntimeException> { server ->
+                val camera = CameraController.find(server.overworld(), uuid.toString())
+                Position(camera.x, camera.y, camera.z)
+            }
+            world.server.runCommand("differangle camera look $uuid 40 15 5")
+            world.server.runOnServer<RuntimeException> { server ->
+                val camera = CameraController.find(server.overworld(), uuid.toString())
+                check(Position(camera.x, camera.y, camera.z) == position) { "look changed camera position" }
+            }
+            val rotation = world.server.computeOnServer<Rotation,RuntimeException> { server ->
+                CameraController.find(server.overworld(), uuid.toString()).viewRotation
+            }
+            world.server.runCommand("differangle camera move $uuid 3 -58.4 6")
+            world.server.runOnServer<RuntimeException> { server ->
+                check(CameraController.find(server.overworld(), uuid.toString()).viewRotation == rotation) { "move changed camera rotation" }
+            }
             world.server.runCommand("tp @a 0 -60 8 180 0")
             context.waitTicks(10)
             context.runOnClient<RuntimeException> { check(DifferangleClient.runtime.statistics.cameraUpdates == 0) }
