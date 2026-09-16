@@ -44,6 +44,7 @@ data class CameraDefinition(
     val updateRate: Int = 15,
     val priority: Int = 0,
     val enabled: Boolean = true,
+    val offAxis: OffAxisProjection? = null,
 ) {
     init {
         require(id.isNotBlank())
@@ -60,12 +61,24 @@ data class CameraDefinition(
         .translate(-(position.x - origin.x).toFloat(), -(position.y - origin.y).toFloat(), -(position.z - origin.z).toFloat())
 
     /** Right-handed perspective. The backend selects its clip-space depth convention. */
-    fun projectionMatrix(zZeroToOne: Boolean = false): Matrix4f = Matrix4f().perspective(
+    fun projectionMatrix(zZeroToOne: Boolean = false): Matrix4f = offAxis?.matrix(nearPlane, farPlane, zZeroToOne) ?: Matrix4f().perspective(
         Math.toRadians(fov.toDouble()).toFloat(), resolution.aspect, nearPlane, farPlane, zZeroToOne,
     )
 
     /** Vanilla feature pipelines use reversed Z: near=1, far=0 in the depth attachment. */
-    fun renderProjectionMatrix(zZeroToOne: Boolean): Matrix4f = Matrix4f().perspective(
+    fun renderProjectionMatrix(zZeroToOne: Boolean): Matrix4f = offAxis?.matrix(nearPlane, farPlane, zZeroToOne)?.also {
+        // Reverse only depth; swapping near/far would also scale asymmetric frustum bounds.
+        it.m22(if (zZeroToOne) -1f - it.m22() else -it.m22())
+        it.m32(-it.m32())
+    } ?: Matrix4f().perspective(
         Math.toRadians(fov.toDouble()).toFloat(), resolution.aspect, farPlane, nearPlane, zZeroToOne,
     )
+}
+
+data class OffAxisProjection(val left: Float, val right: Float, val bottom: Float, val top: Float) {
+    init {
+        require(listOf(left, right, bottom, top).all { it.isFinite() })
+        require(right > left && top > bottom)
+    }
+    fun matrix(near: Float, far: Float, zeroToOne: Boolean) = Matrix4f().frustum(left, right, bottom, top, near, far, zeroToOne)
 }

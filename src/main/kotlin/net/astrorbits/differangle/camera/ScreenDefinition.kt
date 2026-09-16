@@ -19,10 +19,13 @@ data class ScreenDefinition(
      * pixels shape its picture: the resolution's aspect is exactly the stretch shown inside this screen.
      */
     val resolution: Resolution = Resolution(),
+    val mirror: Boolean = false,
+    val updateRate: Int = 15,
 ) {
     init {
         require(id.isNotBlank() && cameraId.isNotBlank())
         require(width.isFinite() && height.isFinite() && width > 0f && height > 0f)
+        require(updateRate in 1..240)
     }
 
     fun modelMatrix(origin: Position): Matrix4f = Matrix4f()

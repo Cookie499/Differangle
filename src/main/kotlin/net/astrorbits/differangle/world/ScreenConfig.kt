@@ -13,6 +13,7 @@ data class ScreenConfig(
     val offsetX: Double = 0.0, val offsetY: Double = 0.0, val offsetZ: Double = 0.5,
     val yaw: Float = 0f, val pitch: Float = 0f, val roll: Float = 0f,
     val frameDepth: Float = 0.0625f,
+    val mirror: Boolean = false,
 ) {
     init {
         require(width.isFinite() && width in 0.125f..64f && height.isFinite() && height in 0.125f..64f)
@@ -30,6 +31,7 @@ data class ScreenConfig(
         out.putDouble("offset_x", offsetX); out.putDouble("offset_y", offsetY); out.putDouble("offset_z", offsetZ)
         out.putFloat("yaw", yaw); out.putFloat("pitch", pitch); out.putFloat("roll", roll)
         out.putFloat("frame_depth", frameDepth)
+        out.putBoolean("mirror", mirror)
     }
 
     companion object {
@@ -42,7 +44,7 @@ data class ScreenConfig(
                 input.getBooleanOr("enabled", true),
                 input.getDoubleOr("offset_x", 0.0), input.getDoubleOr("offset_y", 0.0), input.getDoubleOr("offset_z", 0.5),
                 input.getFloatOr("yaw", 0f), input.getFloatOr("pitch", 0f), input.getFloatOr("roll", 0f),
-                input.getFloatOr("frame_depth", 0.0625f)) }.getOrElse { ScreenConfig(cameraUuid = binding) }
+                input.getFloatOr("frame_depth", 0.0625f), input.getBooleanOr("mirror", false)) }.getOrElse { ScreenConfig(cameraUuid = binding) }
         }
     }
 }

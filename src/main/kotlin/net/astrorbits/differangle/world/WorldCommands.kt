@@ -239,6 +239,7 @@ object WorldCommands {
         .then(screenOp("configure"))
         .then(screenOp("transform"))
         .then(screenOp("status"))
+        .then(screenOp("mirror"))
         // Submitted by the screen GUI; the payload carries the revision guard, so it has no tab completion.
         .then(screenOp("edit"))
 
@@ -390,9 +391,9 @@ object WorldCommands {
         return try {
             val raw = listOf(op) + StringArgumentType.getString(context, SCREEN_PAYLOAD).trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
             when (op) {
-                "bind", "enabled", "configure", "transform", "status" -> {
+                "bind", "enabled", "configure", "transform", "status", "mirror" -> {
                     val required = when (op) {
-                        "bind", "enabled" -> 5
+                        "bind", "enabled", "mirror" -> 5
                         "configure" -> 9
                         "transform" -> 10
                         else -> 4
@@ -404,6 +405,7 @@ object WorldCommands {
                     val updated = when (op) {
                         "bind" -> old.copy(cameraUuid = if (raw[4] == "none") null else ScreenConfig.uuid(raw[4]) ?: error("bad camera UUID"))
                         "enabled" -> old.copy(enabled = flag(raw[4]))
+                        "mirror" -> old.copy(mirror = flag(raw[4]))
                         "configure" -> old.copy(width = angle(raw, 4), height = angle(raw, 5), resX = raw[6].toInt(), resY = raw[7].toInt(), fps = raw[8].toInt())
                         "transform" -> old.copy(offsetX = number(raw, 4), offsetY = number(raw, 5), offsetZ = number(raw, 6), yaw = angle(raw, 7), pitch = angle(raw, 8), roll = angle(raw, 9))
                         "status" -> return feedback(context, Component.translatable("differangle.screen.status", entity.screenUuid.toString(), old.toString()))
@@ -418,11 +420,12 @@ object WorldCommands {
                     val entity = CameraController.screen(source.level, pos)
                     require(raw[4] == entity.screenUuid.toString() && raw[5].toLong() == entity.revision) { "screen revision" }
                     val p = raw.take(4) + raw.drop(6)
-                    require(p.size == 18) { "screen edit" }
+                    require(p.size in 18..19) { "screen edit" }
                     val updated = ScreenConfig(
                         if (p[4] == "none") null else ScreenConfig.uuid(p[4]) ?: error("bad camera UUID"),
                         angle(p, 5), angle(p, 6), p[7].toInt(), p[8].toInt(), p[9].toInt(), flag(p[10]),
                         number(p, 11), number(p, 12), number(p, 13), angle(p, 14), angle(p, 15), angle(p, 16), angle(p, 17),
+                        p.getOrNull(18)?.let(::flag) ?: entity.config.mirror,
                     )
                     CameraController.configure(source.level, pos, updated)
                     feedback(context, Component.translatable("differangle.screen.updated", entity.screenUuid.toString()))

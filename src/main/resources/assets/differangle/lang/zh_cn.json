@@ -1,4 +1,5 @@
 {
+  "differangle.screen.editor.mirror": "镜子：%s",
   "differangle.preview.screen.resolution.done": "屏幕分辨率已更新；Embedded 使用此宽高比，Texture 仍共享摄像机画面。",
   "differangle.shaders.status": "实验性摄像机光影：%s（仅 Texture 模式，需要启用 Iris 光影包）。已保存到客户端配置。",
   "block.differangle.screen_base": "显示屏基座",
@@ -51,7 +52,7 @@
   "differangle.camera.pose.easing.linear": "匀速",
   "differangle.camera.pose.easing.smoothstep": "平滑",
 
-  "differangle.screen.help": "/differangle screen —— 显示屏基座，目标使用基座坐标 <x> <y> <z>\n  bind      <x y z> <Camera UUID|none>                          绑定 / 解绑 Camera\n  enabled   <x y z> <true|false>                               开关这块屏幕\n  configure <x y z> <宽> <高> <resX> <resY> <fps>              尺寸与分辨率\n  transform <x y z> <offsetX offsetY offsetZ> <yaw pitch roll>  画面偏移与旋转\n  status    <x y z>                                            当前配置\n  右键基座可打开设置界面，界面提交的 edit 分支同样使用这些坐标与 UUID",
+  "differangle.screen.help": "/differangle screen —— 显示屏基座，目标使用基座坐标 <x> <y> <z>\n  bind      <x y z> <Camera UUID|none>                          绑定 / 解绑 Camera\n  enabled   <x y z> <true|false>                               开关这块屏幕\n  configure <x y z> <宽> <高> <resX> <resY> <fps>              尺寸与分辨率\n  transform <x y z> <offsetX offsetY offsetZ> <yaw pitch roll>  画面偏移与旋转\n  mirror    <x y z> <true|false>                            镜子开关（仅 Texture，无需摄像机）\n  status    <x y z>                                            当前配置\n  右键基座可打开设置界面，界面提交的 edit 分支同样使用这些坐标与 UUID",
   "differangle.screen.status": "Screen %s: %s",
   "differangle.screen.updated": "显示屏已更新：%s",
   "differangle.screen.editor.title": "显示屏设置",
@@ -84,7 +85,7 @@
   "differangle.mode.summary": "当前模式=%s；可选：%s。",
   "differangle.mode.done": "模式：%s。%s",
   "differangle.mode.texture": "按 Camera FPS 刷新，同一 Camera 的 Screen 共享画面。",
-  "differangle.mode.embedded": "实验模式，每帧按 Screen 绘制；不使用 Camera FPS/颜色缓存。",
+  "differangle.mode.embedded": "低优先级实验模式，每帧按 Screen 绘制；不使用 Camera FPS/颜色缓存。镜子仅支持 Texture。",
   "differangle.layer.summary": "图层 %s\n用法：/differangle layer <%s> <true|false>",
 
   "differangle.preview.help": "临时原型（不写入世界）：\n  demo  生成一组临时 Camera/Screen\n  clear 清空\n  camera here|remove|fov|fps|resolution|pose ...\n  screen add|remove|size|pose ...",

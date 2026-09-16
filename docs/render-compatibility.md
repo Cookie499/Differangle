@@ -1,5 +1,7 @@
 # Sodium / Iris 渲染兼容
 
+开发优先级：Texture 为主要支持路径；Embedded 为低优先级实验模式，保留现有功能及必要修复，新功能优先在 Texture 实现。镜子仅支持 Texture。
+
 适配 Minecraft 26.2，验证版本为 Sodium 0.9.1、Iris 1.11.2。本模组不强制安装它们，生产 jar 不包含它们；Iris 自身依赖 Sodium。验证分为原版、仅 Sodium、Sodium + Iris 三组，最后一组覆盖光影开关。未安装时继续使用原版区块网格。
 
 ## 渲染路径

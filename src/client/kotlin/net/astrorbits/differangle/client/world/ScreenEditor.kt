@@ -18,6 +18,7 @@ import net.minecraft.network.chat.Component
 class ScreenEditor(private val entity: ScreenBlockEntity) : Screen(Component.translatable("differangle.screen.editor.title")) {
     private var page = 0
     private var enabled = entity.config.enabled
+    private var mirror = entity.config.mirror
     private var error: Component? = null
     private val values = entity.config.let { c -> mutableMapOf(
         "camera" to (c.cameraUuid?.toString() ?: ""), "width" to c.width.toString(), "height" to c.height.toString(),
@@ -36,7 +37,11 @@ class ScreenEditor(private val entity: ScreenBlockEntity) : Screen(Component.tra
                 it.setResponder { text -> values[key] = text }
             })
         }
-        field("camera",label("camera"),left,27,300)
+        field("camera",label("camera"),left,27,198)
+        addRenderableWidget(Button.builder(Component.translatable("differangle.screen.editor.mirror", mirror)) {
+            mirror = !mirror
+            it.message = Component.translatable("differangle.screen.editor.mirror", mirror)
+        }.bounds(left+204,38,96,20).build())
         val fields = if (page == 0) listOf("width","height","resX","resY","fps","depth")
             else listOf("x","y","z","yaw","pitch","roll")
         fields.forEachIndexed { index, key -> field(key,label(key),left+(index%2)*154,64+(index/2)*35,146) }
@@ -59,11 +64,11 @@ class ScreenEditor(private val entity: ScreenBlockEntity) : Screen(Component.tra
             val binding = values.getValue("camera").trim()
             val config = ScreenConfig(
                 if (binding.isEmpty()) null else ScreenConfig.uuid(binding) ?: throw IllegalArgumentException("differangle.error.uuid"),
-                f("width"),f("height"),i("resX"),i("resY"),i("fps"),enabled,d("x"),d("y"),d("z"),f("yaw"),f("pitch"),f("roll"),f("depth"))
+                f("width"),f("height"),i("resX"),i("resY"),i("fps"),enabled,d("x"),d("y"),d("z"),f("yaw"),f("pitch"),f("roll"),f("depth"),mirror)
             check(minecraft.level === entity.level && !entity.isRemoved) { "differangle.error.screen.unloaded" }
             val p = entity.blockPos
             val args = listOf(config.cameraUuid ?: "none",config.width,config.height,config.resX,config.resY,config.fps,config.enabled,
-                config.offsetX,config.offsetY,config.offsetZ,config.yaw,config.pitch,config.roll,config.frameDepth).joinToString(" ")
+                config.offsetX,config.offsetY,config.offsetZ,config.yaw,config.pitch,config.roll,config.frameDepth,config.mirror).joinToString(" ")
             minecraft.connection?.sendCommand("differangle screen edit ${p.x} ${p.y} ${p.z} ${entity.screenUuid} ${entity.revision} $args")
             onClose()
         } catch (_: NumberFormatException) { error = Component.translatable("differangle.screen.editor.error.number") }

@@ -7,7 +7,8 @@ uniform sampler2D Sampler0;
 #endif
 void main() {
 #ifdef TEXTURED
-    fragColor = texture(Sampler0, texCoord);
+    vec2 uv = vec2(SurfaceColor.x > 0.5 ? 1.0 - texCoord.x : texCoord.x, texCoord.y);
+    fragColor = texture(Sampler0, uv);
 #else
     fragColor = SurfaceColor;
 #endif

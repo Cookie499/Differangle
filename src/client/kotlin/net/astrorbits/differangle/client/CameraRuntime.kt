@@ -67,6 +67,8 @@ class CameraRuntime : AutoCloseable {
     private val environments = CameraEnvironmentSampler()
     private var context: LevelRenderContext? = null
     private val prepared = mutableMapOf<Pair<String, Resolution>, PreparedCameraView>()
+    private data class MirrorFrame(val target: TextureTarget, var definition: CameraDefinition, var renderedAt: Long = 0)
+    private val mirrors = mutableMapOf<String, MirrorFrame>()
     private var deferredContext: LevelRenderContext? = null
     private val logger = LoggerFactory.getLogger("Differangle")
 
@@ -80,6 +82,7 @@ class CameraRuntime : AutoCloseable {
     fun tick(client: Minecraft) {
         syncWorld(client)
         net.astrorbits.differangle.client.world.WorldClient.tick(client, this)
+        if (mirrors.isNotEmpty() && system.screens().none { it.mirror && it.enabled }) reloadResources()
         world?.let { environments.tick(it, system.cameras()) }
     }
 
@@ -94,6 +97,8 @@ class CameraRuntime : AutoCloseable {
     fun reloadResources() {
         deferredContext = null
         system.invalidateFrames()
+        mirrors.values.forEach { it.target.destroyBuffers() }
+        mirrors.clear()
         renderer?.close()
         renderer = null
         prepared.clear()
@@ -148,7 +153,7 @@ class CameraRuntime : AutoCloseable {
         val surfaces = system.screens().filter {
             it.isFrontFacing(origin) && camera.cullFrustum.isVisible(bounds(it, origin))
         }
-        val visible = surfaces.filter { it.enabled && cameras[it.cameraId]?.enabled == true }
+        val visible = surfaces.filter { it.enabled && (if (it.mirror) mode == CameraMode.TEXTURE else cameras[it.cameraId]?.enabled == true) }
         val start = System.nanoTime()
         context = renderContext
         dispatcher?.lock()
@@ -162,7 +167,33 @@ class CameraRuntime : AutoCloseable {
             net.astrorbits.differangle.client.world.WorldGeometry.debug(origin,camera.viewRotationMatrix,target,gpu.compositor)
             surfaces.forEach { gpu.compositor.solid(it.modelMatrix(origin),camera.viewRotationMatrix,target) }
             if (mode == CameraMode.TEXTURE) {
-                statistics = system.renderFrame(start, visible.map { it.id }, origin)
+                val regular = system.renderFrame(start, visible.filter { !it.mirror }.map { it.id }, origin)
+                var mirrorUpdates = 0
+                var mirrorDraws = 0
+                val requested = system.screens().filter { it.mirror && it.enabled }.associateBy { it.id }
+                mirrors.entries.removeIf { (id, frame) ->
+                    val screen = requested[id]
+                    if (screen == null || screen.resolution != frame.definition.resolution) {
+                        frame.target.destroyBuffers(); true
+                    } else false
+                }
+                for (screen in visible.filter { it.mirror }) {
+                    val definition = MirrorView.camera(screen, origin, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
+                    val frame = mirrors.getOrPut(screen.id) {
+                        MirrorFrame(TextureTarget("Differangle mirror ${screen.id}", definition.resolution.width,
+                            definition.resolution.height, true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM), definition)
+                    }
+                    if (frame.renderedAt == 0L || start - frame.renderedAt >= definition.intervalNanos) {
+                        frame.definition = definition
+                        drawTexture(definition, frame.target)
+                        frame.renderedAt = start
+                        mirrorUpdates++
+                    }
+                    drawSurface(screen, frame.target, origin)
+                    mirrorDraws++
+                }
+                statistics = FrameStatistics(regular.cameraUpdates + mirrorUpdates, regular.screenDraws + mirrorDraws,
+                    regular.cachedCameraCount + mirrors.size)
             } else {
                 val target = renderContext.gameRenderer().mainRenderTarget()
                 for (screen in visible) {

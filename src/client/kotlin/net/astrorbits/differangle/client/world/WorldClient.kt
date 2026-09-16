@@ -48,7 +48,7 @@ object WorldClient {
         (screens-nextScreens).forEach(runtime.system::removeScreen)
         (cameras-nextCameras).forEach(runtime.system::removeCamera)
         for (entity in entities) {
-            val users = blocks.filter { it.config.cameraUuid == entity.uuid && it.config.enabled }
+            val users = blocks.filter { it.config.cameraUuid == entity.uuid && it.config.enabled && !it.config.mirror }
             val largest = users.maxByOrNull { it.config.resX*it.config.resY }?.config
             val resolution = largest?.let { Resolution(it.resX,it.resY) } ?: Resolution()
             val fps = minOf(entity.fps,users.maxOfOrNull { it.config.fps } ?: entity.fps)
@@ -77,6 +77,6 @@ object WorldClient {
         val rad=(Math.PI/180).toFloat()
         q.rotateYXZ(c.yaw*rad,c.pitch*rad,c.roll*rad)
         return ScreenDefinition(entity.screenUuid.toString(),c.cameraUuid?.toString() ?: "unbound",Position(position.x,position.y,position.z),
-            Rotation(q.x,q.y,q.z,q.w),c.width,c.height,c.enabled,Resolution(c.resX,c.resY))
+            Rotation(q.x,q.y,q.z,q.w),c.width,c.height,c.enabled,Resolution(c.resX,c.resY),c.mirror,c.fps)
     }
 }

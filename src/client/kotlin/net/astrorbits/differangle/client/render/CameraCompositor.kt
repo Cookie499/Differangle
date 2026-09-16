@@ -56,7 +56,8 @@ class CameraCompositor : AutoCloseable {
     }
 
     fun surface(screen: ScreenDefinition, origin: Position, mainView: Matrix4f, target: RenderTarget, color: GpuTextureView) {
-        val uniform = surfaces.writeUniform(SurfaceUniform(Matrix4f(mainView).mul(screen.modelMatrix(origin))))
+        val uniform = surfaces.writeUniform(SurfaceUniform(Matrix4f(mainView).mul(screen.modelMatrix(origin)),
+            Vector4f(if (screen.mirror) 1f else 0f, 0f, 0f, 1f)))
         RenderSystem.getDevice().createCommandEncoder().createRenderPass(
             { "Differangle screen ${screen.id}" }, target.colorTextureView!!, Optional.empty(),
             target.depthTextureView!!, OptionalDouble.empty(),
