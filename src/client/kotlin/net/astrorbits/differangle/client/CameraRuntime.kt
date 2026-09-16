@@ -66,7 +66,7 @@ class CameraRuntime : AutoCloseable {
     private var renderer: CameraWorldRenderer? = null
     private val environments = CameraEnvironmentSampler()
     private var context: LevelRenderContext? = null
-    private val prepared = mutableMapOf<String, PreparedCameraView>()
+    private val prepared = mutableMapOf<Pair<String, Resolution>, PreparedCameraView>()
     private var deferredContext: LevelRenderContext? = null
     private val logger = LoggerFactory.getLogger("Differangle")
 
@@ -166,7 +166,10 @@ class CameraRuntime : AutoCloseable {
             } else {
                 val target = renderContext.gameRenderer().mainRenderTarget()
                 for (screen in visible) {
-                    gpu.draw(prepare(cameras.getValue(screen.cameraId)),
+                    val source = cameras.getValue(screen.cameraId)
+                    // Embedded draws this screen itself, so its own pixels shape the picture: the screen's
+                    // resolution aspect is the stretch it shows, independent of what other screens ask for.
+                    gpu.draw(prepare(source.copy(resolution = screen.resolution)),
                         gpu.compositor.embedded(screen, origin, camera.viewRotationMatrix, target))
                 }
                 statistics = FrameStatistics(prepared.size, visible.size, 0)
@@ -189,7 +192,8 @@ class CameraRuntime : AutoCloseable {
         }
     }
 
-    private fun prepare(camera: CameraDefinition) = prepared.getOrPut(camera.id) {
+    /** One prepared view per camera and picture shape: Embedded gives every screen its own resolution. */
+    private fun prepare(camera: CameraDefinition) = prepared.getOrPut(camera.id to camera.resolution) {
         val client = Minecraft.getInstance()
         val loadedDistance = (client.options.effectiveRenderDistance * 16).toFloat()
         renderer!!.prepare(camera, context!!.levelRenderer(), environments.sample(world!!, camera,

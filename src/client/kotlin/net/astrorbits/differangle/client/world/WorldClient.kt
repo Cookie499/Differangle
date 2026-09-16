@@ -77,6 +77,6 @@ object WorldClient {
         val rad=(Math.PI/180).toFloat()
         q.rotateYXZ(c.yaw*rad,c.pitch*rad,c.roll*rad)
         return ScreenDefinition(entity.screenUuid.toString(),c.cameraUuid?.toString() ?: "unbound",Position(position.x,position.y,position.z),
-            Rotation(q.x,q.y,q.z,q.w),c.width,c.height,c.enabled)
+            Rotation(q.x,q.y,q.z,q.w),c.width,c.height,c.enabled,Resolution(c.resX,c.resY))
     }
 }

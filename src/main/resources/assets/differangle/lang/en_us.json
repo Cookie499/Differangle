@@ -95,7 +95,7 @@
   "differangle.preview.camera.remove.done": "Removed temporary camera %s; bound screens keep the binding and show black.",
   "differangle.preview.camera.fov.done": "FOV updated.",
   "differangle.preview.camera.fps.done": "FPS updated (texture mode only).",
-  "differangle.preview.camera.resolution.done": "Resolution updated; the aspect ratio applies to both modes.",
+  "differangle.preview.camera.resolution.done": "Resolution updated; its aspect applies to Texture mode, while Embedded uses each screen's own resolution.",
   "differangle.preview.camera.pose.done": "Camera position and rotation updated.",
   "differangle.preview.screen.add.done": "Screen placed four blocks ahead.",
   "differangle.preview.screen.remove.done": "Screen removed.",

@@ -11,6 +11,14 @@ data class ScreenDefinition(
     val width: Float = 4f,
     val height: Float = 2.25f,
     val enabled: Boolean = true,
+    /**
+     * Pixels this screen asks for.
+     *
+     * Texture mode renders one target per camera, so there the scheduler picks a single resolution for the whole
+     * group and every screen stretches that picture. Embedded draws each screen itself, so this screen's own
+     * pixels shape its picture: the resolution's aspect is exactly the stretch shown inside this screen.
+     */
+    val resolution: Resolution = Resolution(),
 ) {
     init {
         require(id.isNotBlank() && cameraId.isNotBlank())

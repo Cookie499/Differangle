@@ -75,7 +75,7 @@ val stats = system.renderFrame(System.nanoTime(), listOf("monitor"), origin)
 - 位置使用 Double。构造矩阵前先减去渲染原点，再转 Float，保留远距离世界坐标的小数精度。
 - Camera 的单位四元数朝向 -Z，+Y 向上。`minecraftDegrees` 转换 Minecraft yaw/pitch，并支持 roll。
 - `viewMatrix(origin)` 的输入顶点必须相对于同一 `origin`。默认 origin 是 Camera 位置，此时矩阵只含旋转；不要把绝对世界坐标直接乘上它。
-- FOV 是垂直角度，宽高比来自 Target 分辨率，与 Screen 的世界尺寸独立。
+- FOV 是垂直角度。Texture 模式下宽高比来自共享 Target 的分辨率，与 Screen 的世界尺寸独立；Embedded 模式下每块屏幕按自己的分辨率宽高比投影，见 [Embedded 内容接入](embedded-native-content.md)。
 - 投影默认采用右手系、NDC 深度 [-1, 1]，也可显式生成 [0, 1]。生产后端应匹配当前 GPU pipeline 的深度约定；反向 Z 和其他特殊投影需要后端另行适配。
 - Screen 的局部顶点范围是 X/Y 各 [-0.5, 0.5]，正面法线为 +Z。显示 Quad 只渲染正面，背面在 CPU 需求判断和 GPU Cull 两处过滤；外壳/背板可由普通模型单独表现。
 - Camera Target 的深度只用于 Camera 自身；合成 Screen 时应使用 Screen 表面在主视角的深度。

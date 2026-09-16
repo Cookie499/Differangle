@@ -95,7 +95,7 @@
   "differangle.preview.camera.remove.done": "已移除临时 Camera %s，关联 Screen 保留绑定并黑屏。",
   "differangle.preview.camera.fov.done": "FOV 已更新。",
   "differangle.preview.camera.fps.done": "FPS 已更新（仅 texture 模式生效）。",
-  "differangle.preview.camera.resolution.done": "分辨率已更新；宽高比用于两个模式。",
+  "differangle.preview.camera.resolution.done": "分辨率已更新；宽高比在 texture 模式生效，embedded 由每块屏幕自己的分辨率决定。",
   "differangle.preview.camera.pose.done": "Camera 位置和旋转已更新。",
   "differangle.preview.screen.add.done": "Screen 已放在前方 4 格。",
   "differangle.preview.screen.remove.done": "Screen 已移除。",
