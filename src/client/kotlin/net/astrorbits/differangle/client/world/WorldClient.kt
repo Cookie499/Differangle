@@ -2,6 +2,7 @@ package net.astrorbits.differangle.client.world
 
 import net.astrorbits.differangle.camera.*
 import net.astrorbits.differangle.client.CameraRuntime
+import net.astrorbits.differangle.media.MediaSourceType
 import net.astrorbits.differangle.world.*
 import net.fabricmc.fabric.api.event.player.UseBlockCallback
 import net.minecraft.client.Minecraft
@@ -45,10 +46,13 @@ object WorldClient {
         debugCameras = entities.filter { !it.isInvisible }
         val nextCameras = entities.map { it.uuid.toString() }.toSet()
         val nextScreens = blocks.map { it.screenUuid.toString() }.toSet()
+        runtime.syncMedia(blocks.associate { it.screenUuid.toString() to it.config.media })
         (screens-nextScreens).forEach(runtime.system::removeScreen)
         (cameras-nextCameras).forEach(runtime.system::removeCamera)
         for (entity in entities) {
-            val users = blocks.filter { it.config.cameraUuid == entity.uuid && it.config.enabled && !it.config.mirror }
+            val users = blocks.filter {
+                it.config.media.sourceType == MediaSourceType.CAMERA && it.config.cameraUuid == entity.uuid && it.config.enabled && !it.config.mirror
+            }
             val largest = users.maxByOrNull { it.config.resX*it.config.resY }?.config
             val resolution = largest?.let { Resolution(it.resX,it.resY) } ?: Resolution()
             val fps = minOf(entity.fps,users.maxOfOrNull { it.config.fps } ?: entity.fps)

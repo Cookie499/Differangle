@@ -1,6 +1,7 @@
 package net.astrorbits.differangle.media
 
 import java.net.URI
+import java.net.InetAddress
 import java.util.Locale
 
 enum class MediaSourceType(val serializedName: String) {
@@ -63,7 +64,7 @@ data class MediaConfig(
 }
 
 object MediaUrls {
-    private val imageExtensions = setOf("png", "jpg", "jpeg", "webp")
+    private val imageExtensions = setOf("png", "jpg", "jpeg")
 
     fun requireHttp(value: String): URI {
         val uri = runCatching { URI(value.trim()) }
@@ -88,5 +89,21 @@ object MediaUrls {
             extension in imageExtensions -> MediaSourceType.IMAGE
             else -> null
         }
+    }
+}
+
+object MediaNetworkPolicy {
+    fun requirePublic(addresses: Iterable<InetAddress>) {
+        require(addresses.any()) { "Media host did not resolve" }
+        require(addresses.all(::isPublic)) { "Media URL resolves to a local or private address" }
+    }
+
+    fun isPublic(address: InetAddress): Boolean {
+        if (address.isAnyLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
+            address.isSiteLocalAddress || address.isMulticastAddress) return false
+        val bytes = address.address
+        if (bytes.size == 16 && (bytes[0].toInt() and 0xfe) == 0xfc) return false // IPv6 unique-local fc00::/7
+        if (bytes.size == 4 && (bytes[0].toInt() and 0xff) == 100 && (bytes[1].toInt() and 0xc0) == 64) return false // 100.64/10
+        return true
     }
 }

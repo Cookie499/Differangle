@@ -6,7 +6,7 @@
 
 1. Bilibili 普通投稿视频 URL，包括 `bilibili.com/video/BV...` 和 `b23.tv` 短链接。
 2. 可由 FFmpeg 读取的 HTTP/HTTPS MP4 URL。
-3. HTTP/HTTPS PNG、JPEG、WebP 图片 URL。
+3. HTTP/HTTPS PNG、JPEG 图片 URL。WebP 将在 FFmpeg 图片解码接入后补充。
 
 不嵌入浏览器，不执行网页 JavaScript。首期不保证直播、互动视频、DRM、地区限制内容和会员番剧可用。需要登录的 Bilibili 内容后续通过客户端本地 Cookie 支持；Cookie 不进入世界存档、方块 NBT 或网络同步。
 
@@ -134,7 +134,7 @@ ScreenBlockEntity / ScreenConfig（服务端持久化并同步）
 ## 实施阶段
 
 1. **核心模型与生命周期**：媒体配置、NBT 兼容、URL 校验、会话创建/替换/释放。（已搭建）
-2. **图片闭环**：下载限制、解码、GPU 上传、屏幕显示、资源释放。
+2. **图片闭环**：下载限制、解码、GPU 上传、屏幕显示、资源释放。（代码已接入，待真实客户端/GPU 回归）
 3. **MP4 闭环**：FFmpeg 探测、视频帧、播放时钟、暂停和循环。
 4. **声音闭环**：PCM 队列、音量、不衰减/线性衰减。
 5. **Bilibili**：yt-dlp 工具发现、结构化解析、DASH 双流和过期重试。

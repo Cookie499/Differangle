@@ -9,6 +9,11 @@ import net.astrorbits.differangle.client.render.EmbeddedNativePipelines
 import net.astrorbits.differangle.client.render.PreparedCameraView
 import net.astrorbits.differangle.client.render.TextureCameraBackend
 import net.astrorbits.differangle.client.render.compat.IrisCameraScope
+import net.astrorbits.differangle.client.media.ImageMediaBackend
+import net.astrorbits.differangle.client.media.TextureMediaSession
+import net.astrorbits.differangle.media.MediaConfig
+import net.astrorbits.differangle.media.MediaRuntime
+import net.astrorbits.differangle.media.MediaSourceType
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.Minecraft
@@ -69,6 +74,7 @@ class CameraRuntime : AutoCloseable {
     private val prepared = mutableMapOf<Pair<String, Resolution>, PreparedCameraView>()
     private data class MirrorFrame(val target: TextureTarget, var definition: CameraDefinition, var renderedAt: Long = 0)
     private val mirrors = mutableMapOf<String, MirrorFrame>()
+    private var media = MediaRuntime(ImageMediaBackend())
     private var deferredContext: LevelRenderContext? = null
     private val logger = LoggerFactory.getLogger("Differangle")
 
@@ -86,6 +92,11 @@ class CameraRuntime : AutoCloseable {
         world?.let { environments.tick(it, system.cameras()) }
     }
 
+    fun syncMedia(requested: Map<String, MediaConfig>) {
+        media.sync(requested.filterValues { it.sourceType == MediaSourceType.IMAGE })
+        media.tick()
+    }
+
     fun switchMode(value: CameraMode) {
         RenderSystem.assertOnRenderThread()
         config.saveMode(value)
@@ -99,6 +110,8 @@ class CameraRuntime : AutoCloseable {
         system.invalidateFrames()
         mirrors.values.forEach { it.target.destroyBuffers() }
         mirrors.clear()
+        media.close()
+        media = MediaRuntime(ImageMediaBackend())
         renderer?.close()
         renderer = null
         prepared.clear()
@@ -153,7 +166,10 @@ class CameraRuntime : AutoCloseable {
         val surfaces = system.screens().filter {
             it.isFrontFacing(origin) && camera.cullFrustum.isVisible(bounds(it, origin))
         }
-        val visible = surfaces.filter { it.enabled && (if (it.mirror) mode == CameraMode.TEXTURE else cameras[it.cameraId]?.enabled == true) }
+        fun isMedia(screen: ScreenDefinition) = media.session(screen.id) is TextureMediaSession
+        val visible = surfaces.filter { screen ->
+            screen.enabled && (isMedia(screen) || if (screen.mirror) mode == CameraMode.TEXTURE else cameras[screen.cameraId]?.enabled == true)
+        }
         val start = System.nanoTime()
         context = renderContext
         dispatcher?.lock()
@@ -167,7 +183,7 @@ class CameraRuntime : AutoCloseable {
             net.astrorbits.differangle.client.world.WorldGeometry.debug(origin,camera.viewRotationMatrix,target,gpu.compositor)
             surfaces.forEach { gpu.compositor.solid(it.modelMatrix(origin),camera.viewRotationMatrix,target) }
             if (mode == CameraMode.TEXTURE) {
-                val regular = system.renderFrame(start, visible.filter { !it.mirror }.map { it.id }, origin)
+                val regular = system.renderFrame(start, visible.filter { !it.mirror && !isMedia(it) }.map { it.id }, origin)
                 var mirrorUpdates = 0
                 var mirrorDraws = 0
                 val requested = system.screens().filter { it.mirror && it.enabled }.associateBy { it.id }
@@ -177,7 +193,7 @@ class CameraRuntime : AutoCloseable {
                         frame.target.destroyBuffers(); true
                     } else false
                 }
-                for (screen in visible.filter { it.mirror }) {
+                for (screen in visible.filter { it.mirror && !isMedia(it) }) {
                     val definition = MirrorView.camera(screen, origin, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
                     val frame = mirrors.getOrPut(screen.id) {
                         MirrorFrame(TextureTarget("Differangle mirror ${screen.id}", definition.resolution.width,
@@ -192,11 +208,24 @@ class CameraRuntime : AutoCloseable {
                     drawSurface(screen, frame.target, origin)
                     mirrorDraws++
                 }
-                statistics = FrameStatistics(regular.cameraUpdates + mirrorUpdates, regular.screenDraws + mirrorDraws,
+                var mediaDraws = 0
+                for (screen in visible.filter(::isMedia)) {
+                    val image = (media.session(screen.id) as TextureMediaSession).textureView() ?: continue
+                    gpu.compositor.surface(screen, origin, camera.viewRotationMatrix, target, image)
+                    mediaDraws++
+                }
+                statistics = FrameStatistics(regular.cameraUpdates + mirrorUpdates, regular.screenDraws + mirrorDraws + mediaDraws,
                     regular.cachedCameraCount + mirrors.size)
             } else {
                 val target = renderContext.gameRenderer().mainRenderTarget()
                 for (screen in visible) {
+                    val mediaSession = media.session(screen.id) as? TextureMediaSession
+                    if (mediaSession != null) {
+                        mediaSession.textureView()?.let { image ->
+                            gpu.compositor.surface(screen, origin, camera.viewRotationMatrix, target, image)
+                        }
+                        continue
+                    }
                     val source = cameras.getValue(screen.cameraId)
                     // Embedded draws this screen itself, so its own pixels shape the picture: the screen's
                     // resolution aspect is the stretch it shows, independent of what other screens ask for.
