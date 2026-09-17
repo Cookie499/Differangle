@@ -8,19 +8,29 @@ import org.joml.*
 
 /** Constant-material housing is independent of Camera Targets, including missing/disabled cameras. */
 object WorldGeometry {
+    /**
+     * How far the housing sits behind the picture plane.
+     *
+     * A screen is usually wider than the base block, so its border reaches into the neighbouring blocks. Kept
+     * flush with the picture plane, two adjacent screens ended up with coplanar borders and with borders crossing
+     * the neighbour's picture; recessing the housing hides that overlap behind the pictures instead.
+     */
+    private const val FRAME_RECESS = 1f / 32f
+
     fun housing(block: ScreenBlockEntity,origin: Position,view: Matrix4f,target: RenderTarget,gpu: CameraCompositor) {
         val c=block.config
         val screen=WorldClient.definition(block)
         val model=Matrix4f().translation((screen.position.x-origin.x).toFloat(),(screen.position.y-origin.y).toFloat(),(screen.position.z-origin.z).toFloat()).rotate(screen.rotation.quaternion())
         val gray=Vector4f(.09f,.10f,.12f,1f)
         val border=.04f
-        cube(Matrix4f(model).translate(0f,0f,-c.frameDepth/2-.002f).scale(c.width,c.height,c.frameDepth),view,target,gpu,gray)
+        val depth=c.frameDepth
+        cube(Matrix4f(model).translate(0f,0f,-depth/2-.002f-FRAME_RECESS).scale(c.width,c.height,depth),view,target,gpu,gray)
         for (side in listOf(-1f,1f)) {
-            cube(Matrix4f(model).translate(side*(c.width+border)/2,0f,-c.frameDepth/2).scale(border,c.height+2*border,c.frameDepth),view,target,gpu,gray)
-            cube(Matrix4f(model).translate(0f,side*(c.height+border)/2,-c.frameDepth/2).scale(c.width,border,c.frameDepth),view,target,gpu,gray)
+            cube(Matrix4f(model).translate(side*(c.width+border)/2,0f,-depth/2-FRAME_RECESS).scale(border,c.height+2*border,depth),view,target,gpu,gray)
+            cube(Matrix4f(model).translate(0f,side*(c.height+border)/2,-depth/2-FRAME_RECESS).scale(c.width,border,depth),view,target,gpu,gray)
         }
         val start=WorldClient.baseRotation(block).transform(Vector3d(0.0,0.0,.1)).add(WorldClient.anchor(block))
-        val end=screen.rotation.quaternion().transform(Vector3d(0.0,0.0,-c.frameDepth.toDouble())).add(screen.position.x,screen.position.y,screen.position.z)
+        val end=screen.rotation.quaternion().transform(Vector3d(0.0,0.0,-(depth+FRAME_RECESS).toDouble())).add(screen.position.x,screen.position.y,screen.position.z)
         line(start,end,.045f,origin,view,target,gpu,Vector4f(.15f,.16f,.18f,1f))
     }
     fun debug(origin: Position,view: Matrix4f,target: RenderTarget,gpu: CameraCompositor) {
