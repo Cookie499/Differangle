@@ -41,6 +41,7 @@ fabricApi {
 }
 
 repositories {
+    mavenCentral()
     exclusiveContent {
         forRepository { maven { name = "Modrinth"; url = uri("https://api.modrinth.com/maven") } }
         filter { includeGroup("maven.modrinth") }
@@ -64,6 +65,11 @@ dependencies {
     implementation("net.fabricmc:fabric-language-kotlin:${project.property("kotlin_loader_version")}")
 
     implementation("net.fabricmc.fabric-api:fabric-api:${project.property("fabric_version")}")
+
+    // Cross-platform media playback. These remain external Fabric dependencies so Differangle does
+    // not redistribute WaterMedia or its native bundle inside its own jar.
+    implementation("maven.modrinth:G922NeHS:FdCZ5Rxq") // WaterMedia 3.0.0.23
+    implementation("maven.modrinth:4997XcoK:fYWsOuBz") // WaterMedia Binaries 3.0.0.6
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.1")
 }

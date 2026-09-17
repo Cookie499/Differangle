@@ -14,7 +14,7 @@ Fabric / Minecraft 26.2 多视角摄像机项目，使用 Kotlin 和 Java 25。�
 
 实体摄像机与显示屏已接入持久化、UUID 绑定、右键设置、支架几何、黑屏、单面显示与两点插值，见[使用说明](docs/world-resources.md)。完整轨迹、Replay 适配和镜子仍属后续阶段，设计见[方案文档](docs/camera-entity-screen-blocks.md)。带 NBT 的屏幕复制保留摄像机绑定，仅生成新的屏幕 UUID。
 
-网络媒体屏幕将优先支持 Bilibili 视频 URL、MP4 URL 和图片 URL，并提供声音开关、音量与距离衰减配置。范围、数据模型、解码管线和实施顺序见[网络媒体屏幕设计](docs/media-screens.md)。
+网络媒体屏幕现已接入 Bilibili 普通投稿视频 URL、HTTP/HTTPS MP4 URL 和 PNG/JPEG 图片 URL，并提供声音开关、音量与距离衰减配置。视频使用外部依赖 WaterMedia 3 和 WaterMedia Binaries，覆盖 Windows x86-64、Linux x86-64/ARM64、macOS Intel/Apple Silicon；使用方式、依赖与限制见[网络媒体屏幕说明](docs/media-screens.md)。
 
 ## 构建与测试
 

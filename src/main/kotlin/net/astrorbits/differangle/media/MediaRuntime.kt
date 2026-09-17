@@ -1,28 +1,44 @@
 package net.astrorbits.differangle.media
 
 /** Decoder/render implementations live in the client source set; this core owns their lifecycle. */
+data class MediaRequest(
+    val config: MediaConfig,
+    val width: Int,
+    val height: Int,
+    val fps: Int,
+    val x: Double = 0.0,
+    val y: Double = 0.0,
+    val z: Double = 0.0,
+) {
+    init {
+        require(width in 16..2048 && height in 16..2048 && fps in 1..240)
+        require(x.isFinite() && y.isFinite() && z.isFinite())
+    }
+}
+
 interface MediaSession : AutoCloseable {
-    val config: MediaConfig
+    val request: MediaRequest
+    val config: MediaConfig get() = request.config
     fun tick()
 }
 
 fun interface MediaBackend {
-    fun open(config: MediaConfig): MediaSession
+    fun open(request: MediaRequest): MediaSession
 }
 
 class MediaRuntime(private val backend: MediaBackend) : AutoCloseable {
     private val sessions = linkedMapOf<String, MediaSession>()
 
-    fun sync(requested: Map<String, MediaConfig>) {
-        val media = requested.filterValues { it.sourceType.isMedia }
+    fun sync(requested: Map<String, MediaRequest>) {
+        val media = requested.filterValues { it.config.sourceType.isMedia }
         sessions.entries.removeIf { (id, session) ->
             val next = media[id]
-            if (next == null || next != session.config) {
+            if (next == null || next != session.request) {
                 session.close()
                 true
             } else false
         }
-        media.forEach { (id, config) -> sessions.getOrPut(id) { backend.open(config) } }
+        media.forEach { (id, request) -> sessions.getOrPut(id) { backend.open(request) } }
     }
 
     fun tick() = sessions.values.forEach(MediaSession::tick)

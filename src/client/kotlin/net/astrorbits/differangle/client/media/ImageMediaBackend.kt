@@ -6,6 +6,7 @@ import com.mojang.blaze3d.textures.GpuTextureView
 import net.astrorbits.differangle.media.MediaBackend
 import net.astrorbits.differangle.media.MediaConfig
 import net.astrorbits.differangle.media.MediaNetworkPolicy
+import net.astrorbits.differangle.media.MediaRequest
 import net.astrorbits.differangle.media.MediaSession
 import net.astrorbits.differangle.media.MediaSourceType
 import net.astrorbits.differangle.media.MediaUrls
@@ -32,9 +33,10 @@ interface TextureMediaSession : MediaSession {
 class ImageMediaBackend(
     private val downloader: ImageDownloader = ImageDownloader(),
 ) : MediaBackend {
-    override fun open(config: MediaConfig): MediaSession {
+    override fun open(request: MediaRequest): MediaSession {
+        val config = request.config
         require(config.sourceType == MediaSourceType.IMAGE) { "Image backend cannot open ${config.sourceType.serializedName}" }
-        return ImageMediaSession(config, downloader.download(config.sourceUrl))
+        return ImageMediaSession(request, downloader.download(config.sourceUrl))
     }
 }
 
@@ -121,16 +123,24 @@ class ImageDownloader(
 }
 
 private class ImageMediaSession(
-    override val config: MediaConfig,
+    override val request: MediaRequest,
     private val image: CompletableFuture<NativeImage>,
 ) : TextureMediaSession {
     private var texture: DynamicTexture? = null
+    private var decodedReleased = false
     @Volatile private var closed = false
     override var failure: String? = null
         private set
 
     init {
-        image.whenComplete { decoded, _ -> synchronized(this) { if (closed) decoded?.close() } }
+        image.whenComplete { decoded, _ ->
+            synchronized(this) {
+                if (closed && decoded != null && !decodedReleased) {
+                    decodedReleased = true
+                    decoded.close()
+                }
+            }
+        }
     }
 
     override fun tick() {}
@@ -147,6 +157,7 @@ private class ImageMediaSession(
         return try {
             DynamicTexture({ "Differangle image ${config.sourceUrl}" }, decoded).also { texture = it }.textureView
         } catch (cause: Throwable) {
+            decodedReleased = true
             decoded.close()
             failure = cause.message ?: cause.javaClass.simpleName
             null
@@ -168,7 +179,8 @@ private class ImageMediaSession(
         val currentTexture = texture
         currentTexture?.close()
         texture = null
-        if (currentTexture == null && image.isDone && !image.isCompletedExceptionally && !image.isCancelled) {
+        if (currentTexture == null && !decodedReleased && image.isDone && !image.isCompletedExceptionally && !image.isCancelled) {
+            decodedReleased = true
             image.getNow(null)?.close()
         }
     }

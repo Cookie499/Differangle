@@ -9,9 +9,10 @@ import net.astrorbits.differangle.client.render.EmbeddedNativePipelines
 import net.astrorbits.differangle.client.render.PreparedCameraView
 import net.astrorbits.differangle.client.render.TextureCameraBackend
 import net.astrorbits.differangle.client.render.compat.IrisCameraScope
-import net.astrorbits.differangle.client.media.ImageMediaBackend
+import net.astrorbits.differangle.client.media.ClientMediaBackend
 import net.astrorbits.differangle.client.media.TextureMediaSession
 import net.astrorbits.differangle.media.MediaConfig
+import net.astrorbits.differangle.media.MediaRequest
 import net.astrorbits.differangle.media.MediaRuntime
 import net.astrorbits.differangle.media.MediaSourceType
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext
@@ -74,7 +75,7 @@ class CameraRuntime : AutoCloseable {
     private val prepared = mutableMapOf<Pair<String, Resolution>, PreparedCameraView>()
     private data class MirrorFrame(val target: TextureTarget, var definition: CameraDefinition, var renderedAt: Long = 0)
     private val mirrors = mutableMapOf<String, MirrorFrame>()
-    private var media = MediaRuntime(ImageMediaBackend())
+    private var media = MediaRuntime(ClientMediaBackend())
     private var deferredContext: LevelRenderContext? = null
     private val logger = LoggerFactory.getLogger("Differangle")
 
@@ -92,8 +93,10 @@ class CameraRuntime : AutoCloseable {
         world?.let { environments.tick(it, system.cameras()) }
     }
 
-    fun syncMedia(requested: Map<String, MediaConfig>) {
-        media.sync(requested.filterValues { it.sourceType == MediaSourceType.IMAGE })
+    fun syncMedia(requested: Map<String, MediaRequest>) {
+        media.sync(requested.filterValues {
+            it.config.sourceType in setOf(MediaSourceType.IMAGE, MediaSourceType.VIDEO, MediaSourceType.BILIBILI)
+        })
         media.tick()
     }
 
@@ -111,7 +114,7 @@ class CameraRuntime : AutoCloseable {
         mirrors.values.forEach { it.target.destroyBuffers() }
         mirrors.clear()
         media.close()
-        media = MediaRuntime(ImageMediaBackend())
+        media = MediaRuntime(ClientMediaBackend())
         renderer?.close()
         renderer = null
         prepared.clear()

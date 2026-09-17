@@ -13,6 +13,7 @@ import net.astrorbits.differangle.camera.Clickable
 import net.astrorbits.differangle.camera.Position
 import net.astrorbits.differangle.camera.Rotation
 import net.astrorbits.differangle.media.AudioAttenuation
+import net.astrorbits.differangle.media.MediaConfig
 import net.astrorbits.differangle.media.MediaSourceType
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.minecraft.ChatFormatting
@@ -444,13 +445,18 @@ object WorldCommands {
                     val entity = CameraController.screen(source.level, pos)
                     require(raw[4] == entity.screenUuid.toString() && raw[5].toLong() == entity.revision) { "screen revision" }
                     val p = raw.take(4) + raw.drop(6)
-                    require(p.size in 18..19) { "screen edit" }
+                    require(p.size in setOf(18, 19, 29)) { "screen edit" }
+                    val media = if (p.size == 29) MediaConfig(
+                        MediaSourceType.parse(p[19]), if (p[20] == "none") "" else p[20],
+                        flag(p[21]), flag(p[22]), number(p, 23), flag(p[24]), angle(p, 25),
+                        AudioAttenuation.parse(p[26]), angle(p, 27), p[28].toInt(),
+                    ) else entity.config.media
                     val updated = ScreenConfig(
                         if (p[4] == "none") null else ScreenConfig.uuid(p[4]) ?: error("bad camera UUID"),
                         angle(p, 5), angle(p, 6), p[7].toInt(), p[8].toInt(), p[9].toInt(), flag(p[10]),
                         number(p, 11), number(p, 12), number(p, 13), angle(p, 14), angle(p, 15), angle(p, 16), angle(p, 17),
                         p.getOrNull(18)?.let(::flag) ?: entity.config.mirror,
-                        entity.config.media,
+                        media,
                     )
                     CameraController.configure(source.level, pos, updated)
                     feedback(context, Component.translatable("differangle.screen.updated", entity.screenUuid.toString()))

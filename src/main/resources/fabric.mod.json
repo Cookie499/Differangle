@@ -30,6 +30,8 @@
         "fabricloader": ">=${loader_version}",
         "fabric-language-kotlin": ">=${kotlin_loader_version}",
         "fabric-api": "*",
+        "watermedia": ">=3.0.0.23",
+        "watermedia_binaries": ">=3.0.0.6",
         "minecraft": "${minecraft_version}"
     }
 }
