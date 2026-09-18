@@ -17,7 +17,7 @@ object MirrorView {
         val cx = -center.dot(right).toFloat()
         val cy = center.dot(up).toFloat()
         // A proper rotation keeps native backface culling intact. The compositor reverses U.
-        val rotation = q.rotateY(Math.PI.toFloat())
+        val rotation = q.rotateY(0f) //Math.PI.toFloat()
         return CameraDefinition("mirror:${screen.id}", Position(reflected.x, reflected.y, reflected.z),
             Rotation(rotation.x, rotation.y, rotation.z, rotation.w), nearPlane = distance.toFloat(),
             farPlane = farPlane, resolution = screen.resolution, updateRate = screen.updateRate,
