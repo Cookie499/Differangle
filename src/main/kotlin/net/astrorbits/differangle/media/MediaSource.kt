@@ -42,6 +42,8 @@ data class MediaConfig(
     val attenuation: AudioAttenuation = AudioAttenuation.LINEAR,
     val audibleDistance: Float = 32.0f,
     val maxVideoHeight: Int = 720,
+    /** Server game time at which [positionSeconds] was established; -1 marks legacy unsynchronized data. */
+    val positionGameTime: Long = -1L,
 ) {
     init {
         require(sourceUrl.length <= MAX_URL_LENGTH) { "Media URL is too long" }
@@ -49,6 +51,7 @@ data class MediaConfig(
         require(volume.isFinite() && volume in 0f..1f) { "Invalid media volume" }
         require(audibleDistance.isFinite() && audibleDistance in 1f..256f) { "Invalid audible distance" }
         require(maxVideoHeight in 144..4320) { "Invalid maximum video height" }
+        require(positionGameTime >= -1L) { "Invalid media synchronization time" }
         if (sourceType.isMedia) {
             require(sourceUrl.isNotBlank()) { "Media URL is required" }
             MediaUrls.requireHttp(sourceUrl)
@@ -57,6 +60,13 @@ data class MediaConfig(
             require(MediaUrls.isBilibili(sourceUrl)) { "Not a Bilibili video URL" }
         }
     }
+
+    /** The server-authoritative target position. Server game time does not advance while the world is offline. */
+    fun positionAt(gameTime: Long): Double = positionSeconds +
+        if (playing && positionGameTime >= 0L) (gameTime - positionGameTime).coerceAtLeast(0L) / 20.0 else 0.0
+
+    fun anchored(gameTime: Long, position: Double = positionSeconds): MediaConfig =
+        copy(positionSeconds = position, positionGameTime = gameTime)
 
     companion object {
         const val MAX_URL_LENGTH = 2048

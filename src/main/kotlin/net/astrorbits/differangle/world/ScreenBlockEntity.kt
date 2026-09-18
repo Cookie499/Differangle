@@ -36,6 +36,10 @@ class ScreenBlockEntity(pos: BlockPos, state: BlockState) : BlockEntity(WorldRes
             val dimension = world.dimension().identifier().toString()
             if (savedDimension.isNotEmpty() && savedDimension != dimension) renewIdentity()
             savedDimension = dimension
+            // Old saves had only a fixed seek position. Anchor them once so all clients share a clock.
+            if (config.media.sourceType.isMedia && config.media.positionGameTime < 0L) {
+                configure(config.copy(media = config.media.anchored(world.gameTime)))
+            }
         }
     }
 

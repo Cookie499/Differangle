@@ -24,7 +24,9 @@ import java.awt.image.BufferedImage
 import java.awt.image.DataBufferInt
 import java.net.InetAddress
 import java.util.ArrayDeque
+import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 /** Cross-platform WaterMedia adapter. Software frames keep the Minecraft GPU backend abstract. */
 class WaterMediaBackend : MediaBackend {
@@ -45,6 +47,7 @@ private class WaterMediaSession(
     private var texture: DynamicTexture? = null
     private var attempted = false
     private var configuredAudioSource = 0
+    private var synchronizationTicks = 0
     @Volatile private var closed = false
     @Volatile override var failure: String? = null
         private set
@@ -66,6 +69,10 @@ private class WaterMediaSession(
         }
         if (active.error()) fail(IllegalStateException("WaterMedia playback failed"))
         updateAudio(active)
+        if (++synchronizationTicks >= SYNCHRONIZATION_INTERVAL_TICKS) {
+            synchronizationTicks = 0
+            synchronizePlayback(active)
+        }
     }
 
     private fun createPlayer() {
@@ -91,7 +98,8 @@ private class WaterMediaSession(
             created.repeat(config.loop)
             created.volume(mediaVolume())
             if (config.playing) created.start() else created.startPaused()
-            if (config.positionSeconds > 0.0) created.seek((config.positionSeconds * 1000.0).toLong())
+            val target = synchronizedPositionMillis(created)
+            if (target > 0L) created.seek(target)
         } catch (cause: Throwable) {
             if (created != null) created.release() else output?.release()
             player = null
@@ -153,6 +161,22 @@ private class WaterMediaSession(
         }
     }
 
+    private fun synchronizePlayback(active: MediaPlayer) {
+        if (!config.playing || !active.canSeek() || active.loading() || active.buffering()) return
+        val actual = active.time()
+        if (actual < 0L) return
+        val target = synchronizedPositionMillis(active)
+        if (abs(actual - target) > MAXIMUM_DRIFT_MILLIS) active.seek(target)
+    }
+
+    private fun synchronizedPositionMillis(active: MediaPlayer): Long {
+        val gameTime = Minecraft.getInstance().level?.gameTime ?: config.positionGameTime
+        var target = (config.positionAt(gameTime) * 1000.0).roundToLong().coerceAtLeast(0L)
+        val duration = active.duration()
+        if (duration > 0L) target = if (config.loop) Math.floorMod(target, duration) else target.coerceAtMost(duration)
+        return target
+    }
+
     private fun mediaVolume(): Int {
         val category = Minecraft.getInstance().options.getFinalSoundSourceVolume(SoundSource.RECORDS)
         return (config.volume * category * 100f).roundToInt().coerceIn(0, 100)
@@ -201,6 +225,8 @@ private class WaterMediaSession(
     companion object {
         private val LOGGER = LoggerFactory.getLogger("Differangle")
         private const val MAX_QUEUED_FRAMES = 2
+        private const val SYNCHRONIZATION_INTERVAL_TICKS = 20
+        private const val MAXIMUM_DRIFT_MILLIS = 1_000L
         // AL_EXT_source_distance_model constants used by Minecraft's Channel implementation.
         private const val SOURCE_DISTANCE_MODEL = 0xD000
         private const val LINEAR_DISTANCE_CLAMPED = 0xD003

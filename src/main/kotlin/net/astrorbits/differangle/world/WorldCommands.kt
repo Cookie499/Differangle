@@ -422,7 +422,7 @@ object WorldCommands {
                                 "screen source <x> <y> <z> <camera|bilibili|video|image> [url]"
                             }
                             val url = raw.getOrNull(5) ?: ""
-                            old.copy(media = old.media.copy(sourceType = type, sourceUrl = url))
+                            old.copy(media = old.media.copy(sourceType = type, sourceUrl = url).anchored(source.level.gameTime))
                         }
                         "audio" -> old.copy(media = old.media.copy(
                             audioEnabled = flag(raw[4]), volume = raw[5].toFloat(),
@@ -430,7 +430,7 @@ object WorldCommands {
                         ))
                         "playback" -> old.copy(media = old.media.copy(
                             playing = flag(raw[4]), loop = flag(raw[5]), positionSeconds = raw[6].toDouble(),
-                        ))
+                        ).anchored(source.level.gameTime))
                         "configure" -> old.copy(width = angle(raw, 4), height = angle(raw, 5), resX = raw[6].toInt(), resY = raw[7].toInt(), fps = raw[8].toInt())
                         "transform" -> old.copy(offsetX = number(raw, 4), offsetY = number(raw, 5), offsetZ = number(raw, 6), yaw = angle(raw, 7), pitch = angle(raw, 8), roll = angle(raw, 9))
                         "status" -> return feedback(context, Component.translatable("differangle.screen.status", entity.screenUuid.toString(), old.toString()))
@@ -446,11 +446,23 @@ object WorldCommands {
                     require(raw[4] == entity.screenUuid.toString() && raw[5].toLong() == entity.revision) { "screen revision" }
                     val p = raw.take(4) + raw.drop(6)
                     require(p.size in setOf(18, 19, 29)) { "screen edit" }
-                    val media = if (p.size == 29) MediaConfig(
+                    val requestedMedia = if (p.size == 29) MediaConfig(
                         MediaSourceType.parse(p[19]), if (p[20] == "none") "" else p[20],
                         flag(p[21]), flag(p[22]), number(p, 23), flag(p[24]), angle(p, 25),
                         AudioAttenuation.parse(p[26]), angle(p, 27), p[28].toInt(),
                     ) else entity.config.media
+                    val oldMedia = entity.config.media
+                    val timelineChanged = requestedMedia.sourceType != oldMedia.sourceType ||
+                        requestedMedia.sourceUrl != oldMedia.sourceUrl || requestedMedia.playing != oldMedia.playing ||
+                        requestedMedia.loop != oldMedia.loop || requestedMedia.positionSeconds != oldMedia.positionSeconds
+                    val media = if (!timelineChanged) requestedMedia.copy(positionGameTime = oldMedia.positionGameTime)
+                    else {
+                        // When the editor changed play/loop but left the position field untouched, continue
+                        // from the position the authoritative clock has reached instead of jumping backwards.
+                        val position = if (requestedMedia.positionSeconds == oldMedia.positionSeconds)
+                            oldMedia.positionAt(source.level.gameTime) else requestedMedia.positionSeconds
+                        requestedMedia.anchored(source.level.gameTime, position)
+                    }
                     val updated = ScreenConfig(
                         if (p[4] == "none") null else ScreenConfig.uuid(p[4]) ?: error("bad camera UUID"),
                         angle(p, 5), angle(p, 6), p[7].toInt(), p[8].toInt(), p[9].toInt(), flag(p[10]),

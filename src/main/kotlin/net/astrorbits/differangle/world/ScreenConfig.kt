@@ -46,6 +46,7 @@ data class ScreenConfig(
         out.putString("audio_attenuation", media.attenuation.serializedName)
         out.putFloat("audio_distance", media.audibleDistance)
         out.putInt("media_max_height", media.maxVideoHeight)
+        out.putLong("media_position_game_time", media.positionGameTime)
     }
 
     companion object {
@@ -60,6 +61,7 @@ data class ScreenConfig(
                 input.getFloatOr("audio_volume", 1f),
                 AudioAttenuation.parse(input.getStringOr("audio_attenuation", "linear")),
                 input.getFloatOr("audio_distance", 32f), input.getIntOr("media_max_height", 720),
+                input.getLongOr("media_position_game_time", -1L),
             ) }.getOrDefault(MediaConfig())
             return runCatching { ScreenConfig(binding,
                 input.getFloatOr("width", 2f), input.getFloatOr("height", 1.125f),

@@ -99,6 +99,8 @@ WaterMedia 的 `BiliBiliPlatform` 直接调用 Bilibili API，当前能解析普
 - 直连 MP4 和 Bilibili DASH 由同一套 WaterMedia 播放器管理；
 - Bilibili DASH 使用独立视频和音频输入，共用一个播放时钟；
 - WaterMedia 负责解码、音频时钟、丢帧、暂停、跳转与循环；
+- 服务端保存基准进度和对应的世界 `gameTime`；客户端加入、换维度或重建播放器时据此计算当前目标进度；
+- 播放中的客户端每 20 tick 检查一次 WaterMedia 时钟，偏差超过 1 秒才跳转校正；暂停和手动跳转会建立新的时间锚点；
 - Differangle 使用 WaterMedia 的 `AWTEngine` 取得软件帧，自己的上传队列最多保留两帧；
 - Bilibili 软件帧在上传时自动做上下翻转，等价于 Z 轴旋转 180° 后再左右翻转；该修正不作用于直连 MP4、图片或 Camera；
 - 画面落后时丢帧，画面领先时等待；
@@ -131,7 +133,7 @@ WaterMedia 的 `ALEngine` 在 Minecraft 已创建的 OpenAL 上下文中输出�
 
 ## 多人和安全边界
 
-服务器同步原始 URL 和播放状态，客户端各自解析、下载和解码。服务器不代理媒体字节。后续播放同步使用服务端游戏时间加基准位置；目标是观看一致，不追求逐采样同步。
+服务器同步原始 URL、播放状态、基准位置和基准游戏刻，客户端各自解析、下载和解码。服务器不代理媒体字节。同步目标是让各客户端保持约 1 秒内的观看进度一致，不追求逐采样同步；服务器离线时世界游戏时间不前进，媒体进度也不会跨停服时间推进。
 
 由于服务器可以向客户端同步 URL，网络加载前必须实施客户端信任策略。当前 URL 校验会拒绝凭据、回环、链路本地和私有入口地址；图片加载还会重新校验每一次重定向。FFmpeg 内部的视频重定向无法由现有校验层逐次检查，因此在服务器信任确认完成前，只应在可信服务器使用媒体 URL。
 
@@ -142,8 +144,9 @@ WaterMedia 的 `ALEngine` 在 Minecraft 已创建的 OpenAL 上下文中输出�
 - **已完成**：WaterMedia MP4/Bilibili 播放适配、暂停、跳转基准、循环、画质选择和最多两帧的上传队列。
 - **已完成**：WaterMedia OpenAL 声源、Minecraft 音量分类、不衰减和线性距离衰减。
 - **已完成**：以外部依赖方式接入 WaterMedia 的全平台 FFmpeg 原生包和 Bilibili 平台解析。
+- **已完成**：基于服务端游戏时间的多人播放进度、加入时定位和 WaterMedia 漂移校正。
 - **已验证**：27 项测试、正式构建、依赖未混入 Differangle JAR，以及真实客户端中的 Binaries 提取、Bilibili 平台注册、FFmpeg 初始化和 Minecraft OpenAL 启动。
 - **待回归**：在游戏世界中分别播放真实图片、MP4 和 Bilibili 地址，并验证多屏幕卸载、换维度和长时间播放。
-- **待实现**：WebP、临时 URL 无缝恢复、服务端时间同步、客户端服务器信任确认、跨屏幕资源共享和原生 GPU 纹理零拷贝。
+- **待实现**：WebP、临时 URL 无缝恢复、客户端服务器信任确认、跨屏幕资源共享和原生 GPU 纹理零拷贝。
 
 WaterMedia 与 WaterMedia Binaries 使用 PolyForm Strict 1.0.0。Differangle 只通过其公开 API 建立外部依赖，不复制源码、不修改依赖，也不把依赖重新打包进自己的产物。
