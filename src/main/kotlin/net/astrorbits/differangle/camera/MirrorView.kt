@@ -22,6 +22,6 @@ object MirrorView {
             Rotation(rotation.x, rotation.y, rotation.z, rotation.w), nearPlane = distance.toFloat(),
             farPlane = farPlane, resolution = screen.resolution, updateRate = screen.updateRate,
             offAxis = OffAxisProjection(cx - screen.width / 2, cx + screen.width / 2,
-                cy - screen.height / 2, cy + screen.height / 2))
+                cy - screen.height / 2, cy + screen.height / 2), mirrored = true)
     }
 }

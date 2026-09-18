@@ -5,6 +5,8 @@
     "compatibilityLevel": "JAVA_25",
     "client": [
         "CameraGameRendererMixin",
+        "MirrorNameTagGlyphMixin",
+        "MirrorNameTagMixin",
         "SodiumCameraVisibilityMixin",
         "EmbeddedFeaturePipelineMixin",
         "EmbeddedEnvironmentPipelineMixin",

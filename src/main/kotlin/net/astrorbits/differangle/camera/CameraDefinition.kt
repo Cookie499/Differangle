@@ -45,6 +45,8 @@ data class CameraDefinition(
     val priority: Int = 0,
     val enabled: Boolean = true,
     val offAxis: OffAxisProjection? = null,
+    /** True only for the reflected observer used by a Texture-mode mirror. */
+    val mirrored: Boolean = false,
 ) {
     init {
         require(id.isNotBlank())
