@@ -36,6 +36,11 @@ class CameraMirrorGameTest : FabricClientGameTest {
                 }
             }
             context.takeScreenshot("mirror-front-player")
+            context.input.holdKey { it.keyUp }
+            context.waitTicks(4)
+            context.takeScreenshot("mirror-walking-bob")
+            context.input.releaseKey { it.keyUp }
+            context.waitTicks(1)
             world.server.runCommand("tp @a 1.5 -60 0.5 0 0")
             await(context)
             context.takeScreenshot("mirror-offset-player")

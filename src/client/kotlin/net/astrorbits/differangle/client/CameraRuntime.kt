@@ -6,6 +6,7 @@ import net.astrorbits.differangle.camera.*
 import net.astrorbits.differangle.client.render.CameraWorldRenderer
 import net.astrorbits.differangle.client.render.CameraEnvironmentSampler
 import net.astrorbits.differangle.client.render.EmbeddedNativePipelines
+import net.astrorbits.differangle.client.render.MainViewEye
 import net.astrorbits.differangle.client.render.PreparedCameraView
 import net.astrorbits.differangle.client.render.TextureCameraBackend
 import net.astrorbits.differangle.client.render.compat.IrisCameraScope
@@ -165,6 +166,7 @@ class CameraRuntime : AutoCloseable {
         if (dispatcher == null && !FabricLoader.getInstance().isModLoaded("sodium")) return
         val camera = renderContext.levelState().cameraRenderState
         val origin = Position(camera.pos.x, camera.pos.y, camera.pos.z)
+        val mirrorEye = MainViewEye.resolve(camera, client.gameRenderer.gameRenderState().optionsRenderState.bobView)
         val cameras = system.cameras().associateBy { it.id }
         val surfaces = system.screens().filter {
             it.isFrontFacing(origin) && camera.cullFrustum.isVisible(bounds(it, origin))
@@ -197,7 +199,7 @@ class CameraRuntime : AutoCloseable {
                     } else false
                 }
                 for (screen in visible.filter { it.mirror && !isMedia(it) }) {
-                    val definition = MirrorView.camera(screen, origin, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
+                    val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
                     val frame = mirrors.getOrPut(screen.id) {
                         MirrorFrame(TextureTarget("Differangle mirror ${screen.id}", definition.resolution.width,
                             definition.resolution.height, true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM), definition)
