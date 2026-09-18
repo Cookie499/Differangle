@@ -108,11 +108,19 @@ private class WaterMediaSession(
         val image = NativeImage(width, height, false)
         try {
             val destination = image.pixelBytes
-            for (argb in pixels) {
-                destination.put(((argb ushr 16) and 0xff).toByte())
-                destination.put(((argb ushr 8) and 0xff).toByte())
-                destination.put((argb and 0xff).toByte())
-                destination.put(((argb ushr 24) and 0xff).toByte())
+            val flipVertically = config.sourceType == MediaSourceType.BILIBILI
+            for (destinationY in 0 until height) {
+                // Bilibili needs Z +180 degrees followed by a horizontal mirror. Combined,
+                // those operations are a vertical flip, so reverse rows during the copy.
+                val sourceY = if (flipVertically) height - 1 - destinationY else destinationY
+                val rowStart = sourceY * width
+                for (x in 0 until width) {
+                    val argb = pixels[rowStart + x]
+                    destination.put(((argb ushr 16) and 0xff).toByte())
+                    destination.put(((argb ushr 8) and 0xff).toByte())
+                    destination.put((argb and 0xff).toByte())
+                    destination.put(((argb ushr 24) and 0xff).toByte())
+                }
             }
             destination.flip()
             synchronized(queue) {

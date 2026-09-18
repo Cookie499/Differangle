@@ -100,6 +100,7 @@ WaterMedia 的 `BiliBiliPlatform` 直接调用 Bilibili API，当前能解析普
 - Bilibili DASH 使用独立视频和音频输入，共用一个播放时钟；
 - WaterMedia 负责解码、音频时钟、丢帧、暂停、跳转与循环；
 - Differangle 使用 WaterMedia 的 `AWTEngine` 取得软件帧，自己的上传队列最多保留两帧；
+- Bilibili 软件帧在上传时自动做上下翻转，等价于 Z 轴旋转 180° 后再左右翻转；该修正不作用于直连 MP4、图片或 Camera；
 - 画面落后时丢帧，画面领先时等待；
 - 暂停、跳转、换源和循环都会清空帧队列及音频队列。
 
