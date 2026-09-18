@@ -19,6 +19,8 @@ data class MediaRequest(
 interface MediaSession : AutoCloseable {
     val request: MediaRequest
     val config: MediaConfig get() = request.config
+    /** Apply a compatible request without discarding decoder or texture state. */
+    fun update(request: MediaRequest): Boolean = false
     fun tick()
 }
 
@@ -33,7 +35,7 @@ class MediaRuntime(private val backend: MediaBackend) : AutoCloseable {
         val media = requested.filterValues { it.config.sourceType.isMedia }
         sessions.entries.removeIf { (id, session) ->
             val next = media[id]
-            if (next == null || next != session.request) {
+            if (next == null || (next != session.request && !session.update(next))) {
                 session.close()
                 true
             } else false

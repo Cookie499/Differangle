@@ -39,9 +39,11 @@ class WaterMediaBackend : MediaBackend {
 }
 
 private class WaterMediaSession(
-    override val request: MediaRequest,
+    initialRequest: MediaRequest,
     private val mrl: MRL,
 ) : TextureMediaSession {
+    @Volatile override var request: MediaRequest = initialRequest
+        private set
     private val queue = ArrayDeque<NativeImage>(MAX_QUEUED_FRAMES)
     private var player: MediaPlayer? = null
     private var texture: DynamicTexture? = null
@@ -51,6 +53,47 @@ private class WaterMediaSession(
     @Volatile private var closed = false
     @Volatile override var failure: String? = null
         private set
+
+    @Synchronized
+    override fun update(request: MediaRequest): Boolean {
+        if (closed) return false
+        val previous = this.request
+        val old = previous.config
+        val next = request.config
+        if (old.sourceType != next.sourceType || old.sourceUrl != next.sourceUrl ||
+            old.audioEnabled != next.audioEnabled) return false
+
+        this.request = request
+        val active = player ?: return true
+        if (previous.width != request.width || previous.height != request.height) {
+            active.maxSize(request.width, request.height)
+        }
+        if (old.maxVideoHeight != next.maxVideoHeight) active.quality(MediaQuality.of(next.maxVideoHeight))
+        if (old.loop != next.loop) active.repeat(next.loop)
+        active.volume(mediaVolume())
+        if (old.attenuation != next.attenuation || old.audibleDistance != next.audibleDistance ||
+            previous.x != request.x || previous.y != request.y || previous.z != request.z) {
+            configuredAudioSource = 0
+            updateAudio(active)
+        }
+
+        val target = synchronizedPositionMillis(active)
+        val actual = active.time()
+        val timelineChanged = old.positionSeconds != next.positionSeconds ||
+            old.positionGameTime != next.positionGameTime
+        if (old.playing != next.playing) {
+            if (next.playing) {
+                if (actual >= 0L && abs(actual - target) > CONTROL_SEEK_DRIFT_MILLIS) active.seek(target)
+                active.pause(false)
+            } else {
+                active.pause(true)
+                if (actual >= 0L && abs(actual - target) > MAXIMUM_PAUSED_DRIFT_MILLIS) active.seek(target)
+            }
+        } else if (timelineChanged && actual >= 0L && abs(actual - target) > CONTROL_SEEK_DRIFT_MILLIS) {
+            active.seek(target)
+        }
+        return true
+    }
 
     override fun tick() {
         if (closed) return
@@ -231,6 +274,7 @@ private class WaterMediaSession(
         private val LOGGER = LoggerFactory.getLogger("Differangle")
         private const val MAX_QUEUED_FRAMES = 2
         private const val SYNCHRONIZATION_INTERVAL_TICKS = 20
+        private const val CONTROL_SEEK_DRIFT_MILLIS = 1_000L
         private const val MAXIMUM_PAUSED_DRIFT_MILLIS = 100L
         // AL_EXT_source_distance_model constants used by Minecraft's Channel implementation.
         private const val SOURCE_DISTANCE_MODEL = 0xD000
