@@ -73,7 +73,7 @@ class CameraRuntime : AutoCloseable {
     private val environments = CameraEnvironmentSampler()
     private var context: LevelRenderContext? = null
     private val prepared = mutableMapOf<Pair<String, Resolution>, PreparedCameraView>()
-    private data class MirrorFrame(val target: TextureTarget, var definition: CameraDefinition, var renderedAt: Long = 0)
+    private data class MirrorFrame(val target: TextureTarget, var definition: CameraDefinition)
     private val mirrors = mutableMapOf<String, MirrorFrame>()
     private var media = MediaRuntime(ClientMediaBackend())
     private var deferredContext: LevelRenderContext? = null
@@ -202,12 +202,12 @@ class CameraRuntime : AutoCloseable {
                         MirrorFrame(TextureTarget("Differangle mirror ${screen.id}", definition.resolution.width,
                             definition.resolution.height, true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM), definition)
                     }
-                    if (frame.renderedAt == 0L || start - frame.renderedAt >= definition.intervalNanos) {
-                        frame.definition = definition
-                        drawTexture(definition, frame.target)
-                        frame.renderedAt = start
-                        mirrorUpdates++
-                    }
+                    // A mirror camera is derived from the interpolated main eye every render frame.
+                    // Reusing it at the screen's media FPS makes head bob, mouse motion and FOV
+                    // changes advance the physical quad while its reflected view remains stale.
+                    frame.definition = definition
+                    drawTexture(definition, frame.target)
+                    mirrorUpdates++
                     drawSurface(screen, frame.target, origin)
                     mirrorDraws++
                 }

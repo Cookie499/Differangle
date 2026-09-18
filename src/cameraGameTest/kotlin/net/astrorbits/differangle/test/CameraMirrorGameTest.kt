@@ -16,7 +16,8 @@ class CameraMirrorGameTest : FabricClientGameTest {
                 "summon minecraft:pig 2 -60 1 {NoAI:1b,NoGravity:1b}")) world.server.runCommand(command)
             world.server.runOnServer<RuntimeException> { server ->
                 val entity = CameraController.screen(server.overworld(), BlockPos(0, -59, 5))
-                CameraController.configure(server.overworld(), entity.blockPos, entity.config.copy(width = 4f, height = 3f, fps = 30))
+                // Mirror correctness is tied to the observer frame, even when the persisted screen FPS is low.
+                CameraController.configure(server.overworld(), entity.blockPos, entity.config.copy(width = 4f, height = 3f, fps = 1))
             }
             world.server.runCommand("differangle screen mirror 0 -59 5 true")
             context.waitTicks(80)
@@ -26,6 +27,14 @@ class CameraMirrorGameTest : FabricClientGameTest {
                 check((client.level!!.getBlockEntity(BlockPos(0,-59,5)) as ScreenBlockEntity).config.mirror)
             }
             await(context)
+            repeat(3) {
+                context.waitTicks(1)
+                context.runOnClient<RuntimeException> {
+                    check(DifferangleClient.runtime.statistics.cameraUpdates == 1) {
+                        "Visible mirror was not refreshed with the main view"
+                    }
+                }
+            }
             context.takeScreenshot("mirror-front-player")
             world.server.runCommand("tp @a 1.5 -60 0.5 0 0")
             await(context)
