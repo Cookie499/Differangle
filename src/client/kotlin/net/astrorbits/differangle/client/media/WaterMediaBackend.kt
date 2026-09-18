@@ -162,11 +162,12 @@ private class WaterMediaSession(
     }
 
     private fun synchronizePlayback(active: MediaPlayer) {
-        if (!config.playing || !active.canSeek() || active.loading() || active.buffering()) return
+        if (!active.canSeek() || active.loading() || active.buffering()) return
         val actual = active.time()
         if (actual < 0L) return
         val target = synchronizedPositionMillis(active)
-        if (abs(actual - target) > MAXIMUM_DRIFT_MILLIS) active.seek(target)
+        val maximumDrift = if (config.playing) MAXIMUM_PLAYING_DRIFT_MILLIS else MAXIMUM_PAUSED_DRIFT_MILLIS
+        if (abs(actual - target) > maximumDrift) active.seek(target)
     }
 
     private fun synchronizedPositionMillis(active: MediaPlayer): Long {
@@ -226,7 +227,8 @@ private class WaterMediaSession(
         private val LOGGER = LoggerFactory.getLogger("Differangle")
         private const val MAX_QUEUED_FRAMES = 2
         private const val SYNCHRONIZATION_INTERVAL_TICKS = 20
-        private const val MAXIMUM_DRIFT_MILLIS = 1_000L
+        private const val MAXIMUM_PLAYING_DRIFT_MILLIS = 1_000L
+        private const val MAXIMUM_PAUSED_DRIFT_MILLIS = 100L
         // AL_EXT_source_distance_model constants used by Minecraft's Channel implementation.
         private const val SOURCE_DISTANCE_MODEL = 0xD000
         private const val LINEAR_DISTANCE_CLAMPED = 0xD003

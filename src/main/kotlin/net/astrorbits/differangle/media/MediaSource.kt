@@ -68,6 +68,10 @@ data class MediaConfig(
     fun anchored(gameTime: Long, position: Double = positionSeconds): MediaConfig =
         copy(positionSeconds = position, positionGameTime = gameTime)
 
+    /** A different source always starts on a fresh timeline. */
+    fun withSource(type: MediaSourceType, url: String, gameTime: Long): MediaConfig =
+        copy(sourceType = type, sourceUrl = url).anchored(gameTime, 0.0)
+
     companion object {
         const val MAX_URL_LENGTH = 2048
     }

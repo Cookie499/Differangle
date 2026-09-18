@@ -422,7 +422,7 @@ object WorldCommands {
                                 "screen source <x> <y> <z> <camera|bilibili|video|image> [url]"
                             }
                             val url = raw.getOrNull(5) ?: ""
-                            old.copy(media = old.media.copy(sourceType = type, sourceUrl = url).anchored(source.level.gameTime))
+                            old.copy(media = old.media.withSource(type, url, source.level.gameTime))
                         }
                         "audio" -> old.copy(media = old.media.copy(
                             audioEnabled = flag(raw[4]), volume = raw[5].toFloat(),
@@ -452,10 +452,12 @@ object WorldCommands {
                         AudioAttenuation.parse(p[26]), angle(p, 27), p[28].toInt(),
                     ) else entity.config.media
                     val oldMedia = entity.config.media
-                    val timelineChanged = requestedMedia.sourceType != oldMedia.sourceType ||
-                        requestedMedia.sourceUrl != oldMedia.sourceUrl || requestedMedia.playing != oldMedia.playing ||
+                    val sourceChanged = requestedMedia.sourceType != oldMedia.sourceType ||
+                        requestedMedia.sourceUrl != oldMedia.sourceUrl
+                    val timelineChanged = sourceChanged || requestedMedia.playing != oldMedia.playing ||
                         requestedMedia.loop != oldMedia.loop || requestedMedia.positionSeconds != oldMedia.positionSeconds
                     val media = if (!timelineChanged) requestedMedia.copy(positionGameTime = oldMedia.positionGameTime)
+                    else if (sourceChanged) requestedMedia.anchored(source.level.gameTime, 0.0)
                     else {
                         // When the editor changed play/loop but left the position field untouched, continue
                         // from the position the authoritative clock has reached instead of jumping backwards.
