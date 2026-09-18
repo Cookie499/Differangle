@@ -14,18 +14,15 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Restores the billboard's vertical axis after the reflected view changes handedness. */
+/** Name tags do not have a useful reflection transform, so mirrors omit them. */
 @Mixin(SubmitNodeCollection.class)
 abstract class MirrorNameTagMixin {
     @Inject(
         method = "submitNameTag",
-        at = @At(
-            value = "INVOKE",
-            target = "Lcom/mojang/blaze3d/vertex/PoseStack;scale(FFF)V",
-            shift = At.Shift.BEFORE
-        )
+        at = @At("HEAD"),
+        cancellable = true
     )
-    private void differangle$orientMirrorNameTag(
+    private void differangle$hideMirrorNameTag(
         PoseStack poseStack,
         @Nullable Vec3 nameTagAttachment,
         int offset,
@@ -37,9 +34,7 @@ abstract class MirrorNameTagMixin {
     ) {
         Camera observer = NativeCameraScope.observer;
         if (observer instanceof VirtualCamera camera && camera.getDefinition().getMirrored()) {
-            // Vanilla applies another negative Y scale immediately afterwards. Doubling it here
-            // keeps the glyph plane facing the camera while cancelling the mirror-only inversion.
-            poseStack.scale(1.0F, -1.0F, 1.0F);
+            ci.cancel();
         }
     }
 }
