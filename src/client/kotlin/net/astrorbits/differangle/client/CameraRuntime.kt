@@ -24,6 +24,8 @@ import net.minecraft.network.chat.Component
 import net.minecraft.world.phys.AABB
 import org.joml.Vector3f
 import org.slf4j.LoggerFactory
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /** Owns one scene for the current client world, shared by both rendering algorithms. */
 class CameraRuntime : AutoCloseable {
@@ -69,13 +71,25 @@ class CameraRuntime : AutoCloseable {
         private set
     var cpuMillis = 0.0
         private set
+    var budgetFallbacks = 0
+        private set
+    var mirrorTargetCount = 0
+        private set
+    var mirrorTargetPixels = 0L
+        private set
     private var world: ClientLevel? = null
     private var renderer: CameraWorldRenderer? = null
     private val environments = CameraEnvironmentSampler()
     private var context: LevelRenderContext? = null
     private val prepared = mutableMapOf<Pair<String, Resolution>, PreparedCameraView>()
-    private data class MirrorFrame(val target: TextureTarget, var definition: CameraDefinition)
+    private data class MirrorFrame(
+        val target: TextureTarget,
+        var definition: CameraDefinition,
+        var lastUsedNanos: Long,
+        var renderedAtNanos: Long,
+    )
     private val mirrors = mutableMapOf<String, MirrorFrame>()
+    private val embeddedCooldowns = mutableMapOf<String, Long>()
     private var media = MediaRuntime(ClientMediaBackend())
     private var deferredContext: LevelRenderContext? = null
     private val logger = LoggerFactory.getLogger("Differangle")
@@ -114,6 +128,7 @@ class CameraRuntime : AutoCloseable {
         system.invalidateFrames()
         mirrors.values.forEach { it.target.destroyBuffers() }
         mirrors.clear()
+        embeddedCooldowns.clear()
         media.close()
         media = MediaRuntime(ClientMediaBackend())
         renderer?.close()
@@ -122,6 +137,7 @@ class CameraRuntime : AutoCloseable {
         environments.clear()
         statistics = FrameStatistics(0, 0, 0)
         sectionCount = 0; drawCalls = 0; cpuMillis = 0.0
+        budgetFallbacks = 0; mirrorTargetCount = 0; mirrorTargetPixels = 0L
         lastError = null
         lastFailure = null
         nativeFeatures = NativeFeatureTotals()
@@ -178,6 +194,7 @@ class CameraRuntime : AutoCloseable {
         val start = System.nanoTime()
         context = renderContext
         dispatcher?.lock()
+        var recoverableFailure: Exception? = null
         try {
             val gpu = renderer ?: CameraWorldRenderer(layers, cameraShaders).also { renderer = it }
             gpu.beginFrame()
@@ -198,21 +215,62 @@ class CameraRuntime : AutoCloseable {
                         frame.target.destroyBuffers(); true
                     } else false
                 }
-                for (screen in visible.filter { it.mirror && !isMedia(it) }) {
-                    val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
-                    val frame = mirrors.getOrPut(screen.id) {
-                        MirrorFrame(TextureTarget("Differangle mirror ${screen.id}", definition.resolution.width,
-                            definition.resolution.height, true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM), definition)
-                    }
-                    // A mirror camera is derived from the interpolated main eye every render frame.
-                    // Reusing it at the screen's media FPS makes head bob, mouse motion and FOV
-                    // changes advance the physical quad while its reflected view remains stale.
-                    frame.definition = definition
-                    drawTexture(definition, frame.target)
-                    mirrorUpdates++
-                    drawSurface(screen, frame.target, origin)
-                    mirrorDraws++
+                val mirrorCandidates = visible.filter { it.mirror && !isMedia(it) }
+                    .sortedByDescending { apparentArea(it, origin) }
+                val admittedMirrors = admitMirrors(mirrorCandidates)
+                val admittedIds = admittedMirrors.mapTo(mutableSetOf()) { it.id }
+                mirrors.entries.removeIf { (id, frame) ->
+                    if (id in admittedIds || start - frame.lastUsedNanos < MIRROR_IDLE_NANOS) false
+                    else { frame.target.destroyBuffers(); true }
                 }
+                makeMirrorRoom(admittedMirrors)
+                val updateOrder = admittedMirrors.sortedWith(
+                    compareBy<ScreenDefinition> { mirrors[it.id]?.renderedAtNanos ?: Long.MIN_VALUE }
+                        .thenByDescending { apparentArea(it, origin) },
+                )
+                for ((index, screen) in updateOrder.withIndex()) {
+                    val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
+                    var frame = mirrors[screen.id]
+                    try {
+                        if (frame == null && index < MAX_MIRROR_UPDATES_PER_FRAME && canAllocateMirror(definition.resolution)) {
+                            frame = MirrorFrame(TextureTarget("Differangle mirror ${screen.id}", definition.resolution.width,
+                                definition.resolution.height, true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM), definition,
+                                start, Long.MIN_VALUE)
+                            mirrors[screen.id] = frame
+                        }
+                    } catch (failure: Exception) {
+                        logger.error("Mirror {} target allocation failed; this mirror remains uncached", screen.id, failure)
+                        continue
+                    }
+                    if (frame == null) continue
+                    frame.lastUsedNanos = start
+                    if (index < MAX_MIRROR_UPDATES_PER_FRAME) {
+                        try {
+                            // The freshest mirrors follow the interpolated main eye. Lower-priority mirrors
+                            // retain their last complete frame instead of exhausting the GPU mid-frame.
+                            frame.definition = definition
+                            drawTexture(definition, frame.target)
+                            frame.renderedAtNanos = start
+                            mirrorUpdates++
+                        } catch (failure: Exception) {
+                            mirrors.remove(screen.id)
+                            runCatching { frame.target.destroyBuffers() }
+                            logger.error("Mirror {} rendering failed; only this mirror was disabled for the frame", screen.id, failure)
+                            continue
+                        }
+                    }
+                    try {
+                        drawSurface(screen, frame.target, origin)
+                        mirrorDraws++
+                    } catch (failure: Exception) {
+                        mirrors.remove(screen.id)
+                        runCatching { frame.target.destroyBuffers() }
+                        logger.error("Mirror {} composition failed; only this mirror was disabled for the frame", screen.id, failure)
+                    }
+                }
+                mirrorTargetCount = mirrors.size
+                mirrorTargetPixels = mirrorPixels()
+                budgetFallbacks = mirrorCandidates.size - mirrorUpdates
                 var mediaDraws = 0
                 for (screen in visible.filter(::isMedia)) {
                     val image = (media.session(screen.id) as TextureMediaSession).textureView() ?: continue
@@ -223,21 +281,43 @@ class CameraRuntime : AutoCloseable {
                     regular.cachedCameraCount + mirrors.size)
             } else {
                 val target = renderContext.gameRenderer().mainRenderTarget()
-                for (screen in visible) {
+                val cameraScreens = visible.filter { !isMedia(it) }
+                embeddedCooldowns.entries.removeIf { (id, until) -> until <= start || cameraScreens.none { it.id == id } }
+                val direct = cameraScreens.asSequence()
+                    .filter { embeddedCooldowns[it.id]?.let { until -> until > start } != true }
+                    .sortedByDescending { apparentArea(it, origin) }
+                    .take(MAX_EMBEDDED_DRAWS_PER_FRAME)
+                    .toList()
+                val directIds = direct.mapTo(mutableSetOf()) { it.id }
+                budgetFallbacks = cameraScreens.size - direct.size
+                // Embedded cost grows with the number of screens. Excess screens use the ordinary
+                // shared Texture cache, which updates at most one camera per main frame.
+                val fallback = system.renderFrame(start, cameraScreens.filter { it.id !in directIds }.map { it.id }, origin)
+                var directDraws = 0
+                for (screen in visible.filter(::isMedia)) {
                     val mediaSession = media.session(screen.id) as? TextureMediaSession
-                    if (mediaSession != null) {
-                        mediaSession.textureView()?.let { image ->
-                            gpu.compositor.surface(screen, origin, camera.viewRotationMatrix, target, image)
-                        }
-                        continue
+                    mediaSession?.textureView()?.let { image ->
+                        gpu.compositor.surface(screen, origin, camera.viewRotationMatrix, target, image)
                     }
-                    val source = cameras.getValue(screen.cameraId)
-                    // Embedded draws this screen itself, so its own pixels shape the picture: the screen's
-                    // resolution aspect is the stretch it shows, independent of what other screens ask for.
-                    gpu.draw(prepare(source.copy(resolution = screen.resolution)),
-                        gpu.compositor.embedded(screen, origin, camera.viewRotationMatrix, target))
                 }
-                statistics = FrameStatistics(prepared.size, visible.size, 0)
+                for (screen in direct) {
+                    val source = cameras.getValue(screen.cameraId)
+                    try {
+                        // Embedded draws this screen itself, so its own pixels shape the picture: the screen's
+                        // resolution aspect is the stretch it shows, independent of what other screens ask for.
+                        gpu.draw(prepare(source.copy(resolution = screen.resolution)),
+                            gpu.compositor.embedded(screen, origin, camera.viewRotationMatrix, target))
+                        directDraws++
+                    } catch (failure: Exception) {
+                        embeddedCooldowns[screen.id] = start + EMBEDDED_FAILURE_COOLDOWN_NANOS
+                        logger.error("Embedded screen {} rendering failed; falling back to Texture temporarily", screen.id, failure)
+                        system.frame(screen.cameraId)?.let { drawSurface(screen, it.target.renderTarget, origin) }
+                    }
+                }
+                statistics = FrameStatistics(fallback.cameraUpdates + directDraws,
+                    fallback.screenDraws + directDraws + visible.count(::isMedia), fallback.cachedCameraCount)
+                mirrorTargetCount = mirrors.size
+                mirrorTargetPixels = mirrorPixels()
             }
             sectionCount = prepared.values.sumOf { it.terrain.sections }
             drawCalls = gpu.terrainDraws
@@ -245,15 +325,24 @@ class CameraRuntime : AutoCloseable {
             nativeFeatures = NativeFeatureTotals(native.entityCount, native.blockEntityCount, native.particleCount, native.weatherColumns, native.cloudViews)
         } catch (failure: Exception) {
             logger.error("Camera rendering failed in {} mode", mode.commandName, failure)
-            fail(failureText(failure))
-            system.invalidateFrames()
+            if (failure is EmbeddedNativePipelines.UnadaptedPipelineException) {
+                fail(failureText(failure))
+            } else {
+                recoverableFailure = failure
+            }
         } finally {
-            try { renderer?.endFrame() } finally {
+            try {
+                renderer?.endFrame()
+            } catch (failure: Exception) {
+                logger.error("Camera renderer frame cleanup failed; rebuilding GPU resources", failure)
+                recoverableFailure?.addSuppressed(failure) ?: run { recoverableFailure = failure }
+            } finally {
                 prepared.clear()
                 context = null
                 dispatcher?.unlock()
                 cpuMillis = (System.nanoTime() - start) / 1_000_000.0
             }
+            recoverableFailure?.let(::recoverGpuResources)
         }
     }
 
@@ -306,6 +395,74 @@ class CameraRuntime : AutoCloseable {
             origin.x + points.minOf { it.x } - 0.01, origin.y + points.minOf { it.y } - 0.01, origin.z + points.minOf { it.z } - 0.01,
             origin.x + points.maxOf { it.x } + 0.01, origin.y + points.maxOf { it.y } + 0.01, origin.z + points.maxOf { it.z } + 0.01,
         )
+    }
+
+    /** A transient allocation/submission failure rebuilds secondary resources without hiding every screen forever. */
+    private fun recoverGpuResources(failure: Exception) {
+        lastFailure = failureText(failure)
+        lastError = null
+        runCatching { system.invalidateFrames() }
+            .onFailure { failure.addSuppressed(it) }
+        mirrors.values.forEach { frame ->
+            runCatching { frame.target.destroyBuffers() }.onFailure { failure.addSuppressed(it) }
+        }
+        mirrors.clear()
+        mirrorTargetCount = 0
+        mirrorTargetPixels = 0L
+        runCatching { renderer?.close() }.onFailure { failure.addSuppressed(it) }
+        renderer = null
+    }
+
+    /** Approximate projected area; sufficient for stable overload prioritisation without a GPU query. */
+    private fun apparentArea(screen: ScreenDefinition, eye: Position): Double {
+        val dx = eye.x - screen.position.x
+        val dy = eye.y - screen.position.y
+        val dz = eye.z - screen.position.z
+        val distanceSquared = (dx * dx + dy * dy + dz * dz).coerceAtLeast(0.01)
+        val normal = screen.rotation.quaternion().transform(org.joml.Vector3d(0.0, 0.0, 1.0))
+        val facing = abs(normal.x * dx + normal.y * dy + normal.z * dz) / sqrt(distanceSquared)
+        return screen.width.toDouble() * screen.height.toDouble() * facing / distanceSquared
+    }
+
+    /** Admit the largest visible mirrors without exceeding persistent color+depth target limits. */
+    private fun admitMirrors(candidates: List<ScreenDefinition>): List<ScreenDefinition> {
+        var totalPixels = 0L
+        val result = ArrayList<ScreenDefinition>(minOf(candidates.size, MAX_MIRROR_TARGETS))
+        for (screen in candidates) {
+            val requested = pixels(screen.resolution)
+            if (result.size >= MAX_MIRROR_TARGETS || totalPixels + requested > MAX_MIRROR_TARGET_PIXELS) continue
+            result += screen
+            totalPixels += requested
+        }
+        return result
+    }
+
+    /** Hidden cached targets are the first resources evicted when newly visible mirrors need room. */
+    private fun makeMirrorRoom(admitted: List<ScreenDefinition>) {
+        val protected = admitted.mapTo(mutableSetOf()) { it.id }
+        val missing = admitted.filter { it.id !in mirrors }
+        val missingPixels = missing.sumOf { pixels(it.resolution) }
+        val removable = mirrors.entries.filter { it.key !in protected }.sortedBy { it.value.lastUsedNanos }.iterator()
+        while ((mirrors.size + missing.size > MAX_MIRROR_TARGETS ||
+                mirrorPixels() + missingPixels > MAX_MIRROR_TARGET_PIXELS) && removable.hasNext()) {
+            val entry = removable.next()
+            mirrors.remove(entry.key)?.target?.destroyBuffers()
+        }
+    }
+
+    private fun canAllocateMirror(resolution: Resolution): Boolean =
+        mirrors.size < MAX_MIRROR_TARGETS && mirrorPixels() + pixels(resolution) <= MAX_MIRROR_TARGET_PIXELS
+
+    private fun mirrorPixels(): Long = mirrors.values.sumOf { pixels(it.definition.resolution) }
+    private fun pixels(resolution: Resolution): Long = resolution.width.toLong() * resolution.height
+
+    private companion object {
+        const val MAX_MIRROR_UPDATES_PER_FRAME = 2
+        const val MAX_EMBEDDED_DRAWS_PER_FRAME = 2
+        const val MAX_MIRROR_TARGETS = 8
+        const val MAX_MIRROR_TARGET_PIXELS = 8L * 1024L * 1024L
+        const val MIRROR_IDLE_NANOS = 5_000_000_000L
+        const val EMBEDDED_FAILURE_COOLDOWN_NANOS = 5_000_000_000L
     }
 }
 

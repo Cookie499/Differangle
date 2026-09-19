@@ -33,7 +33,7 @@ object WorldClient {
         } }
         UseBlockCallback.EVENT.register { player,level,hand,hit ->
             val entity = level.getBlockEntity(hit.blockPos) as? ScreenBlockEntity
-            if (entity != null && level.isClientSide && !player.isShiftKeyDown) {
+            if (entity != null && level.isClientSide && !player.isShiftKeyDown && player.getItemInHand(hand).item !== WorldResources.bindingTool) {
                 Minecraft.getInstance().gui.setScreen(ScreenEditor(entity))
                 InteractionResult.SUCCESS
             } else InteractionResult.PASS
@@ -48,9 +48,13 @@ object WorldClient {
         val nextCameras = entities.map { it.uuid.toString() }.toSet()
         val nextScreens = blocks.map { it.screenUuid.toString() }.toSet()
         runtime.syncMedia(blocks.associate {
-            val screen = definition(it)
             it.screenUuid.toString() to MediaRequest(it.config.media, it.config.resX, it.config.resY, it.config.fps,
-                screen.position.x, screen.position.y, screen.position.z)
+                it.blockPos.x + 0.5, it.blockPos.y + 0.5, it.blockPos.z + 0.5,
+                it.speakers.map { binding ->
+                    val speaker = level?.getBlockEntity(binding.pos) as? SpeakerBlockEntity
+                    net.astrorbits.differangle.media.AudioEmitter(binding.pos.x + 0.5, binding.pos.y + 0.5, binding.pos.z + 0.5,
+                        speaker?.speakerUuid == binding.uuid)
+                })
         })
         (screens-nextScreens).forEach(runtime.system::removeScreen)
         (cameras-nextCameras).forEach(runtime.system::removeCamera)

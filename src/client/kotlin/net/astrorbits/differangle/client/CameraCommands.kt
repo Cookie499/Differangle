@@ -93,6 +93,8 @@ object CameraCommands {
                     s.cameraUpdates, s.screenDraws, s.cachedCameraCount, runtime.sectionCount, runtime.drawCalls,
                     Component.literal(String.format(Locale.ROOT, "%.2f", runtime.cpuMillis)),
                     Component.translatable("differangle.status.content", n.entities, n.blockEntities, n.particles, n.weatherColumns, n.cloudViews),
+                    Component.translatable("differangle.status.budget", runtime.budgetFallbacks,
+                        runtime.mirrorTargetCount, runtime.mirrorTargetPixels),
                     Component.literal(runtime.layers.summary()),
                     runtime.lastFailure ?: runtime.compatibilityProblem() ?: Component.translatable("differangle.status.ready"),
                 )

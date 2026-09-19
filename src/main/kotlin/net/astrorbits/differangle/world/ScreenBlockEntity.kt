@@ -13,6 +13,13 @@ class ScreenBlockEntity(pos: BlockPos, state: BlockState) : BlockEntity(WorldRes
     var screenUuid: UUID = UUID.randomUUID(); private set
     var config = ScreenConfig(); private set
     var revision = 0L; private set
+    var speakers: List<SpeakerBinding> = emptyList(); private set
+    fun bindSpeakers(value: List<SpeakerBinding>) {
+        check(level?.isClientSide != true)
+        require(value.size in 1..2 && value.map { it.uuid }.distinct().size == value.size)
+        speakers = value.toList()
+        changed()
+    }
     private var savedDimension = ""
 
     fun configure(value: ScreenConfig) {
@@ -51,6 +58,10 @@ class ScreenBlockEntity(pos: BlockPos, state: BlockState) : BlockEntity(WorldRes
         out.putString("screen_dimension", level?.dimension()?.identifier()?.toString() ?: savedDimension)
         out.putLong("revision", revision)
         config.save(out)
+        speakers.forEachIndexed { index, speaker ->
+            out.putString("speaker_${index}_uuid", speaker.uuid.toString())
+            out.putLong("speaker_${index}_pos", speaker.pos.asLong())
+        }
     }
     override fun loadAdditional(input: ValueInput) {
         super.loadAdditional(input)
@@ -60,6 +71,11 @@ class ScreenBlockEntity(pos: BlockPos, state: BlockState) : BlockEntity(WorldRes
         savedDimension = input.getStringOr("screen_dimension", "")
         revision = input.getLongOr("revision", 0L)
         config = ScreenConfig.load(input)
+        speakers = (0..1).mapNotNull { index ->
+            ScreenConfig.uuid(input.getStringOr("speaker_${index}_uuid", ""))?.let {
+                SpeakerBinding(it, BlockPos.of(input.getLongOr("speaker_${index}_pos", 0L)))
+            }
+        }.distinctBy { it.uuid }
     }
     override fun getUpdatePacket() = ClientboundBlockEntityDataPacket.create(this)
     override fun getUpdateTag(registries: HolderLookup.Provider) = saveCustomOnly(registries)

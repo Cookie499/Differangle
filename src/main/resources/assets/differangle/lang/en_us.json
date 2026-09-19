@@ -23,8 +23,9 @@
   "differangle.render.paused": "Rendering paused: %s Retry with /differangle mode %s.",
   "differangle.render.pipeline": "No embedded variant for pipeline %s; use /differangle mode texture",
   "differangle.status.ready": "ready",
-  "differangle.status.body": "mode=%s camera=%s screen=%s\nupdates=%s screenDraws=%s cached=%s sections=%s draws=%s\ncpu=%sms; %s\nlayers=%s\nstate=%s",
+  "differangle.status.body": "mode=%s camera=%s screen=%s\nupdates=%s screenDraws=%s cached=%s sections=%s draws=%s\ncpu=%sms; %s\n%s\nlayers=%s\nstate=%s",
   "differangle.status.content": "entities=%s blockEntities=%s particles=%s weatherColumns=%s cloudViews=%s",
+  "differangle.status.budget": "budgetFallbacks=%s mirrorTargets=%s mirrorPixels=%s",
 
   "differangle.help": "/differangle - Differangle multi-viewport cameras\n  World commands (game master permission; cameras are targeted by UUID)\n    /differangle camera ...   camera entities: create / list / status / remove / tp / enabled / invisible / fov / fps / near / far / pose / move / look\n    /differangle screen ...   screen bases: bind / enabled / configure / transform / status / mirror\n  Local commands (affect only your own view)\n    /differangle mode texture|embedded       picture source: cached frames / per-frame redraw\n    /differangle layer <layer> <true|false>   toggle one render layer\n    /differangle shaders <true|false>       toggle Texture camera shaders\n    /differangle status                      render statistics\n    /differangle list                        local Camera / Screen definitions\n    /differangle copy <text>                 copy to clipboard\n    /differangle preview demo|clear|...      throwaway prototype, never saved\n  Press TAB after camera / screen for subcommand and argument completion; a branch without arguments prints its usage",
 
@@ -113,5 +114,15 @@
   "differangle.preview.screen.add.done": "Screen placed four blocks ahead.",
   "differangle.preview.screen.remove.done": "Screen removed.",
   "differangle.preview.screen.size.done": "Screen size updated.",
-  "differangle.preview.screen.pose.done": "Screen position and rotation updated."
+  "differangle.preview.screen.pose.done": "Screen position and rotation updated.",
+  "block.differangle.speaker": "Speaker",
+  "differangle.binding.applied": "Binding applied to screen base",
+  "differangle.binding.camera": "Selected camera: %s",
+  "differangle.binding.cleared": "Binding tool cleared",
+  "differangle.binding.dimension": "Target and screen base must be in the same dimension",
+  "differangle.binding.duplicate": "This speaker is already selected",
+  "differangle.binding.full": "Two speakers selected; sneak-right-click to clear",
+  "differangle.binding.permission": "Game master permission is required to configure screens",
+  "differangle.binding.speaker": "Selected speaker %s (1: left, 2: right; one speaker mixes both channels)",
+  "item.differangle.binding_tool": "Binding Tool"
 }

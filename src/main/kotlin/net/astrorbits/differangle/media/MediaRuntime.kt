@@ -9,10 +9,12 @@ data class MediaRequest(
     val x: Double = 0.0,
     val y: Double = 0.0,
     val z: Double = 0.0,
+    val speakers: List<AudioEmitter> = emptyList(),
 ) {
     init {
         require(width in 16..2048 && height in 16..2048 && fps in 1..240)
         require(x.isFinite() && y.isFinite() && z.isFinite())
+        require(speakers.size <= 2)
     }
 }
 

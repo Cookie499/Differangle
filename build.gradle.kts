@@ -87,12 +87,14 @@ if (providers.gradleProperty("cameraGameTest").isPresent) {
     loom.mods.register("differangle_test") { sourceSet(cameraTest) }
     val cameraShaderTest = providers.gradleProperty("cameraShaderTest").isPresent
     val cameraMirrorTest = providers.gradleProperty("cameraMirrorTest").isPresent
+    val audioBindingTest = providers.gradleProperty("audioBindingTest").isPresent
     tasks.named<ProcessResources>(cameraTest.processResourcesTaskName) {
         inputs.property("cameraShaderTest", cameraShaderTest)
         inputs.property("cameraMirrorTest", cameraMirrorTest)
-        if (cameraShaderTest || cameraMirrorTest) filesMatching("fabric.mod.json") {
+        inputs.property("audioBindingTest", audioBindingTest)
+        if (cameraShaderTest || cameraMirrorTest || audioBindingTest) filesMatching("fabric.mod.json") {
             filter { line -> if (line.contains("\"fabric-client-gametest\":"))
-                "    \"fabric-client-gametest\": [\"net.astrorbits.differangle.test.${if (cameraMirrorTest) "CameraMirrorGameTest" else "CameraShaderGameTest"}\"]" else line }
+                "    \"fabric-client-gametest\": [\"net.astrorbits.differangle.test.${if (audioBindingTest) "AudioBindingGameTest" else if (cameraMirrorTest) "CameraMirrorGameTest" else "CameraShaderGameTest"}\"]" else line }
         }
     }
     loom.runs.register("cameraTest") {

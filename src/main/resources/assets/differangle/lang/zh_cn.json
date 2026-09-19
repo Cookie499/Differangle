@@ -23,8 +23,9 @@
   "differangle.render.paused": "渲染暂停：%s 使用 /differangle mode %s 重试。",
   "differangle.render.pipeline": "Embedded 尚未适配管线 %s；请使用 /differangle mode texture",
   "differangle.status.ready": "就绪",
-  "differangle.status.body": "模式=%s Camera=%s Screen=%s\n本帧 Camera 更新=%s Screen 绘制=%s 缓存=%s 区块节=%s Draw=%s\nCPU=%sms；%s\n图层=%s\n状态=%s",
+  "differangle.status.body": "模式=%s Camera=%s Screen=%s\n本帧 Camera 更新=%s Screen 绘制=%s 缓存=%s 区块节=%s Draw=%s\nCPU=%sms；%s\n%s\n图层=%s\n状态=%s",
   "differangle.status.content": "实体=%s 方块实体=%s 粒子=%s 降水列=%s 云视图=%s",
+  "differangle.status.budget": "预算降级=%s 镜面缓存=%s 镜面像素=%s",
 
   "differangle.help": "/differangle —— Differangle 多视角摄像机\n  世界命令（需管理员权限，目标用 Camera 的 UUID）\n    /differangle camera ...   摄像机实体：create / list / status / remove / tp / enabled / invisible / fov / fps / near / far / pose / move / look\n    /differangle screen ...   显示屏基座：bind / enabled / configure / transform / status\n  本地命令（只影响自己的画面）\n    /differangle mode texture|embedded    画面来源：缓存 / 每帧重绘\n    /differangle layer <图层> <true|false>  开关单个渲染图层\n    /differangle shaders <true|false>       Texture 摄像机光影开关\n    /differangle status                    渲染统计\n    /differangle list                      本地 Camera / Screen 定义\n    /differangle copy <文本>               复制到剪贴板\n    /differangle preview demo|clear|...    临时原型，不写入世界\n  输入 camera / screen 后按 TAB 可看到子命令与参数补全；<子命令> 不带参数时显示该分类用法",
 
@@ -113,5 +114,15 @@
   "differangle.preview.screen.add.done": "Screen 已放在前方 4 格。",
   "differangle.preview.screen.remove.done": "Screen 已移除。",
   "differangle.preview.screen.size.done": "Screen 尺寸已更新。",
-  "differangle.preview.screen.pose.done": "Screen 位置和旋转已更新。"
+  "differangle.preview.screen.pose.done": "Screen 位置和旋转已更新。",
+  "block.differangle.speaker": "音响",
+  "differangle.binding.applied": "已推送绑定至屏幕基座",
+  "differangle.binding.camera": "已选择摄像机：%s",
+  "differangle.binding.cleared": "已清空绑定工具",
+  "differangle.binding.dimension": "目标与屏幕基座必须位于同一维度",
+  "differangle.binding.duplicate": "已选择此音响",
+  "differangle.binding.full": "已选择两个音响，请 Shift 右键清空后重新选择",
+  "differangle.binding.permission": "需要管理员权限才能修改屏幕基座",
+  "differangle.binding.speaker": "已选择音响 %s（1：左声道，2：右声道；仅一个时混音）",
+  "item.differangle.binding_tool": "绑定工具"
 }

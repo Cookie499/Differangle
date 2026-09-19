@@ -3,7 +3,7 @@ package net.astrorbits.differangle.client.media
 import com.mojang.blaze3d.platform.NativeImage
 import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.textures.GpuTextureView
-import net.astrorbits.differangle.media.AudioAttenuation
+import net.astrorbits.differangle.media.AudioMix
 import net.astrorbits.differangle.media.MediaBackend
 import net.astrorbits.differangle.media.MediaNetworkPolicy
 import net.astrorbits.differangle.media.MediaRequest
@@ -13,7 +13,6 @@ import net.astrorbits.differangle.media.MediaUrls
 import net.minecraft.client.Minecraft
 import net.minecraft.client.renderer.texture.DynamicTexture
 import net.minecraft.sounds.SoundSource
-import org.lwjgl.openal.AL10
 import org.slf4j.LoggerFactory
 import org.watermedia.WaterMediaConfig
 import org.watermedia.api.media.MRL
@@ -71,7 +70,7 @@ private class WaterMediaSession(
     private var player: MediaPlayer? = null
     private var texture: DynamicTexture? = null
     private var attempted = false
-    private var configuredAudioSource = 0
+    @Volatile private var audioMix = AudioMix.SILENT
     private var synchronizationTicks = 0
     @Volatile private var playerGeneration = 0
     private var playerStartedNanos = 0L
@@ -101,12 +100,7 @@ private class WaterMediaSession(
         }
         if (old.maxVideoHeight != next.maxVideoHeight) active.quality(MediaQuality.of(next.maxVideoHeight))
         if (old.loop != next.loop) active.repeat(next.loop)
-        active.volume(mediaVolume())
-        if (old.attenuation != next.attenuation || old.audibleDistance != next.audibleDistance ||
-            previous.x != request.x || previous.y != request.y || previous.z != request.z) {
-            configuredAudioSource = 0
-            updateAudio(active)
-        }
+        updateAudio(active)
 
         val target = synchronizedPositionMillis(active)
         val actual = active.time()
@@ -178,7 +172,9 @@ private class WaterMediaSession(
                         }
                     }.also { output = it }
                 },
-                { if (config.audioEnabled) MediaAPI.alEngine() else null },
+                { if (config.audioEnabled) MediaAPI.alEngine().also {
+                    (it as Any as SpatialAudioOutput).differangleSpatial { audioMix }
+                } else null },
             ) ?: run {
                 fail(IllegalStateException("WaterMedia could not create a player"))
                 return
@@ -229,22 +225,11 @@ private class WaterMediaSession(
 
     private fun updateAudio(active: MediaPlayer) {
         if (!config.audioEnabled) return
-        val source = active.audioSource()
-        if (source <= 0) return
+        val camera = Minecraft.getInstance().gameRenderer.mainCamera()
+        val position = camera.position()
+        val right = camera.rotation().transform(org.joml.Vector3f(1f, 0f, 0f))
+        audioMix = AudioMix.spatial(request, position.x, position.y, position.z, right.x.toDouble(), right.y.toDouble(), right.z.toDouble())
         active.volume(mediaVolume())
-        if (configuredAudioSource == source) return
-        configuredAudioSource = source
-        AL10.alSourcei(source, AL10.AL_SOURCE_RELATIVE, if (config.attenuation == AudioAttenuation.NONE) AL10.AL_TRUE else AL10.AL_FALSE)
-        if (config.attenuation == AudioAttenuation.NONE) {
-            AL10.alSource3f(source, AL10.AL_POSITION, 0f, 0f, 0f)
-            AL10.alSourcei(source, SOURCE_DISTANCE_MODEL, AL10.AL_NONE)
-        } else {
-            AL10.alSource3f(source, AL10.AL_POSITION, request.x.toFloat(), request.y.toFloat(), request.z.toFloat())
-            AL10.alSourcei(source, SOURCE_DISTANCE_MODEL, LINEAR_DISTANCE_CLAMPED)
-            AL10.alSourcef(source, AL10.AL_MAX_DISTANCE, config.audibleDistance)
-            AL10.alSourcef(source, AL10.AL_ROLLOFF_FACTOR, 1f)
-            AL10.alSourcef(source, AL10.AL_REFERENCE_DISTANCE, 0f)
-        }
     }
 
     private fun synchronizePlayback(active: MediaPlayer) {
@@ -306,7 +291,7 @@ private class WaterMediaSession(
         playerGeneration++
         player = null
         attempted = false
-        configuredAudioSource = 0
+        audioMix = AudioMix.SILENT
         synchronizationTicks = 0
         playerStartedNanos = 0L
         pendingInitialSeekMillis = null
@@ -407,8 +392,5 @@ private class WaterMediaSession(
         private const val STALL_OBSERVATION_INTERVAL_NANOS = 1_000_000_000L
         private const val VIDEO_STALL_TIMEOUT_NANOS = 5_000_000_000L
         private const val PLAYER_STARTUP_GRACE_NANOS = 15_000_000_000L
-        // AL_EXT_source_distance_model constants used by Minecraft's Channel implementation.
-        private const val SOURCE_DISTANCE_MODEL = 0xD000
-        private const val LINEAR_DISTANCE_CLAMPED = 0xD003
     }
 }
