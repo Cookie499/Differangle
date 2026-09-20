@@ -3,7 +3,6 @@ package net.astrorbits.differangle.client.media
 import com.mojang.blaze3d.platform.NativeImage
 import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.textures.GpuTextureView
-import net.astrorbits.differangle.media.AudioMix
 import net.astrorbits.differangle.media.MediaBackend
 import net.astrorbits.differangle.media.MediaNetworkPolicy
 import net.astrorbits.differangle.media.MediaRequest
@@ -70,7 +69,7 @@ private class WaterMediaSession(
     private var player: MediaPlayer? = null
     private var texture: DynamicTexture? = null
     private var attempted = false
-    @Volatile private var audioMix = AudioMix.SILENT
+    @Volatile private var audioOutput: SpatialAudioOutput? = null
     private var synchronizationTicks = 0
     @Volatile private var playerGeneration = 0
     private var playerStartedNanos = 0L
@@ -173,7 +172,9 @@ private class WaterMediaSession(
                     }.also { output = it }
                 },
                 { if (config.audioEnabled) MediaAPI.alEngine().also {
-                    (it as Any as SpatialAudioOutput).differangleSpatial { audioMix }
+                    val spatial = it as Any as SpatialAudioOutput
+                    spatial.differangleSpatial(request)
+                    if (generation == playerGeneration && !closed) audioOutput = spatial
                 } else null },
             ) ?: run {
                 fail(IllegalStateException("WaterMedia could not create a player"))
@@ -225,10 +226,7 @@ private class WaterMediaSession(
 
     private fun updateAudio(active: MediaPlayer) {
         if (!config.audioEnabled) return
-        val camera = Minecraft.getInstance().gameRenderer.mainCamera()
-        val position = camera.position()
-        val right = camera.rotation().transform(org.joml.Vector3f(1f, 0f, 0f))
-        audioMix = AudioMix.spatial(request, position.x, position.y, position.z, right.x.toDouble(), right.y.toDouble(), right.z.toDouble())
+        audioOutput?.differangleSpatial(request)
         active.volume(mediaVolume())
     }
 
@@ -291,7 +289,7 @@ private class WaterMediaSession(
         playerGeneration++
         player = null
         attempted = false
-        audioMix = AudioMix.SILENT
+        audioOutput = null
         synchronizationTicks = 0
         playerStartedNanos = 0L
         pendingInitialSeekMillis = null
@@ -370,6 +368,7 @@ private class WaterMediaSession(
         if (closed) return
         closed = true
         playerGeneration++
+        audioOutput = null
         player?.release()
         player = null
         synchronized(frameLock) {

@@ -1,8 +1,9 @@
 package net.astrorbits.differangle.test
 
 import net.astrorbits.differangle.client.media.SpatialAudioOutput
-import net.astrorbits.differangle.client.media.SpatialPcm
-import net.astrorbits.differangle.media.AudioMix
+import org.lwjgl.openal.AL10.*
+import org.lwjgl.openal.AL11.AL_SAMPLE_OFFSET
+import net.astrorbits.differangle.media.*
 import net.astrorbits.differangle.world.*
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext
@@ -21,25 +22,7 @@ import java.nio.ByteOrder
 
 class AudioBindingGameTest : FabricClientGameTest {
     override fun runTest(context: ClientGameTestContext) {
-        context.runOnClient<RuntimeException> {
-            check(SpatialAudioOutput::class.java.isAssignableFrom(Class.forName("org.watermedia.api.media.engines.ALEngine")))
-            var matrix = AudioMix(1f, 0f, 0f, 1f)
-            val pcm = SpatialPcm { matrix }
-            val input = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).putShort(1234).putShort(-2345).flip()
-            check(pcm.process(input).let { it.short == 1234.toShort() && it.short == (-2345).toShort() })
-            check(input.position() == 0)
-            matrix = AudioMix(0f, 1f, 1f, 0f)
-            check(pcm.process(input).let { it.short == (-2345).toShort() && it.short == 1234.toShort() })
-            val output = org.watermedia.api.media.MediaAPI.alEngine()
-            try {
-                (output as Any as SpatialAudioOutput).differangleSpatial { AudioMix.SILENT }
-                check(output.supportedChannels().single().channels() == 2)
-                check(output.supportedTypes().single() == org.watermedia.api.media.engines.SFXEngine.SampleType.S16)
-                check(output.format(org.watermedia.api.media.engines.SFXEngine.SampleType.S16, 2, 48000))
-                check(output.upload(input))
-                check(org.lwjgl.openal.AL10.alGetError() == org.lwjgl.openal.AL10.AL_NO_ERROR)
-            } finally { output.release() }
-        }
+        context.runOnClient<RuntimeException> { verifyNativeAudio() }
         context.worldBuilder().create().use { world ->
             world.server.runCommand("tp @a 0 -60 0 0 0")
             world.server.runCommand("setblock 0 -59 3 differangle:screen_base")
@@ -95,5 +78,73 @@ class AudioBindingGameTest : FabricClientGameTest {
                 check((client.level!!.getBlockEntity(BlockPos(0, -59, 3)) as ScreenBlockEntity).speakers.size == 2)
             }
         }
+    }
+    private fun verifyNativeAudio() {
+        check(SpatialAudioOutput::class.java.isAssignableFrom(Class.forName("org.watermedia.api.media.engines.ALEngine")))
+        val output = org.watermedia.api.media.MediaAPI.alEngine(2)
+        val spatial = output as Any as SpatialAudioOutput
+        val request = MediaRequest(MediaConfig(audibleDistance = 32f), 256, 144, 15,
+            speakers = listOf(AudioEmitter(-3.0, 1.0, 2.0), AudioEmitter(3.0, 1.0, 2.0)))
+        val silence = ByteBuffer.allocateDirect(48000 * 4).order(ByteOrder.nativeOrder())
+        var sources = intArrayOf()
+        fun position(source: Int): List<Float> = FloatArray(3).also { alGetSourcefv(source, AL_POSITION, it) }.toList()
+        fun queued() = sources.map { alGetSourcei(it, AL_BUFFERS_QUEUED) }
+        try {
+            spatial.differangleSpatial(request)
+            sources = spatial.differangleSources()
+            check(sources.size == 2 && sources[0] != sources[1] && sources[0] == output.source())
+            check(output.supportedChannels().single().channels() == 2)
+            check(output.supportedTypes().single() == org.watermedia.api.media.engines.SFXEngine.SampleType.S16)
+            check(output.format(org.watermedia.api.media.engines.SFXEngine.SampleType.S16, 2, 48000))
+            output.volume(0.8f)
+            check(position(sources[0]) == listOf(-3f, 1f, 2f))
+            check(position(sources[1]) == listOf(3f, 1f, 2f))
+            sources.forEach {
+                check(alGetSourcei(it, AL_SOURCE_RELATIVE) == AL_FALSE)
+                check(alGetSourcei(it, 0xD000) == 0xD003)
+                check(alGetSourcef(it, AL_MAX_DISTANCE) == 32f)
+                check(alGetSourcef(it, AL_REFERENCE_DISTANCE) == 0f)
+                check(alGetSourcef(it, AL_GAIN) == 0.8f)
+            }
+            repeat(2) { check(output.upload(silence)) }
+            check(queued() == listOf(2, 2))
+            check(!output.upload(silence)) // A full queue must not enqueue only one channel.
+            check(queued() == listOf(2, 2))
+            output.buffers().forEach { check(alGetBufferi(it, AL_CHANNELS) == 1) }
+            check(output.pendingMs() == 2000L) // Clock duration remains correct after stereo -> mono split.
+
+            // Move and mute emitters with two seconds already buffered: changes must apply immediately.
+            spatial.differangleSpatial(request.copy(speakers = listOf(AudioEmitter(8.0, 2.0, 4.0))))
+            sources.forEach {
+                check(position(it) == listOf(8f, 2f, 4f))
+                check(alGetSourcef(it, AL_GAIN) == 0.4f)
+            }
+            check(queued() == listOf(2, 2))
+            spatial.differangleSpatial(request.copy(config = request.config.copy(attenuation = AudioAttenuation.NONE),
+                speakers = listOf(request.speakers[0], request.speakers[1].copy(available = false))))
+            check(alGetSourcef(sources[1], AL_GAIN) == 0f)
+            check(sources.all { alGetSourcei(it, 0xD000) == AL_NONE })
+            output.speed(1.25f)
+            check(sources.all { alGetSourcef(it, AL_PITCH) == 1.25f })
+            output.play()
+            check(sources.all { alGetSourcei(it, AL_SOURCE_STATE) == AL_PLAYING })
+            output.pause()
+            check(sources.all { alGetSourcei(it, AL_SOURCE_STATE) == AL_PAUSED })
+            check(alGetSourcei(sources[0], AL_SAMPLE_OFFSET) == alGetSourcei(sources[1], AL_SAMPLE_OFFSET))
+            output.play()
+            output.flush()
+            check(queued() == listOf(0, 0))
+            check(output.pendingMs() == 0L)
+            check(output.upload(silence))
+            check(queued() == listOf(1, 1))
+            output.play()
+            check(sources.all { alGetSourcei(it, AL_SOURCE_STATE) == AL_PLAYING })
+            check(alGetError() == AL_NO_ERROR)
+        } finally { output.release() }
+        check(sources.none { alIsSource(it) })
+        output.release() // Closing and a late game-thread update are safe after decoder teardown.
+        spatial.differangleSpatial(request)
+        check(alGetError() == AL_NO_ERROR)
+        println("NATIVE AUDIO PASS: paired mono queues, live position/gain, attenuation, clock, backpressure, pause/seek and release")
     }
 }
