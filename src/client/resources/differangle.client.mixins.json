@@ -14,7 +14,8 @@
         "CameraLevelTargetsMixin",
         "BlockEntityDispatcherAccessor",
         "ParticleEngineAccessor",
-        "ParticleGroupAccessor"
+        "ParticleGroupAccessor",
+        "EarlyAtlasAnimationMixin"
     ],
     "injectors": {
         "defaultRequire": 1
