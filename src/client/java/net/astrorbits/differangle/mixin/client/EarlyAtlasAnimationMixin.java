@@ -8,13 +8,12 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * TEMPORARY WORKAROUND - removable once the upstream startup race is fixed.
+ * Startup crash guard for the global-settings uniform race on Minecraft 26.2.
  *
  * <p>On Fabric 26.2 the initial resource reload can finish before {@code GameRenderer.render} has ever
- * uploaded the global settings UBO. A slow mod initialization on the render thread (here: Xaero's World
- * Map taking multiple seconds during client startup) is enough to open that window, and then the first
- * {@code Minecraft.runTick} reaches {@code TextureAtlas.tick} with a populated atlas but no Globals
- * uniform, crashing with:
+ * uploaded the global settings UBO. Any mod that keeps the render thread busy at client start for a few
+ * seconds (Xaero's World Map does here) opens that window, and then the first {@code Minecraft.runTick}
+ * reaches {@code TextureAtlas.tick} with a populated atlas but no Globals uniform, crashing with:
  *
  * <pre>java.lang.IllegalStateException: Missing uniform Globals (should be UNIFORM_BUFFER)
  *   at GlCommandEncoder.trySetup
@@ -22,7 +21,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <p>Nothing is on screen yet when the uniform is still absent, so skipping the upload loses no visible
  * animation: {@code uploadAnimationFrames} recomputes from the current tick to the target frame, so the
- * next tick (after the first real frame has rendered) catches straight up.
+ * next tick (after the first real frame has rendered) catches straight up. Reported upstream as the same
+ * failure seen with Distant Horizons + Fabric API alone; this guard can be dropped once the race is
+ * fixed in the game or in a rendering mod.
  */
 @Mixin(TextureAtlas.class)
 abstract class EarlyAtlasAnimationMixin {
