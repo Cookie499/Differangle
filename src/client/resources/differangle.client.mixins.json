@@ -15,7 +15,8 @@
         "BlockEntityDispatcherAccessor",
         "ParticleEngineAccessor",
         "ParticleGroupAccessor",
-        "EarlyAtlasAnimationMixin"
+        "EarlyAtlasAnimationMixin",
+        "InteractionScreenMixin"
     ],
     "injectors": {
         "defaultRequire": 1

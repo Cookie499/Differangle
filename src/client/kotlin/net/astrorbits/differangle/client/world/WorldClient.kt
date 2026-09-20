@@ -5,18 +5,20 @@ import net.astrorbits.differangle.client.CameraRuntime
 import net.astrorbits.differangle.media.MediaSourceType
 import net.astrorbits.differangle.media.MediaRequest
 import net.astrorbits.differangle.world.*
-import net.fabricmc.fabric.api.event.player.UseBlockCallback
 import net.minecraft.client.Minecraft
 import net.minecraft.client.multiplayer.ClientLevel
+import net.minecraft.client.player.LocalPlayer
 import net.minecraft.client.renderer.entity.*
 import net.minecraft.client.renderer.entity.state.EntityRenderState
+import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
 import net.minecraft.network.chat.Component
-import net.minecraft.world.InteractionResult
 import org.joml.Quaternionf
 import org.joml.Vector3d
+import org.slf4j.LoggerFactory
 
 object WorldClient {
+    private val LOGGER = LoggerFactory.getLogger("differangle")
     private var world: ClientLevel? = null
     private var cameras = setOf<String>()
     private var screens = setOf<String>()
@@ -31,13 +33,29 @@ object WorldClient {
                 if (!entity.isInvisible) state.nameTag = Component.literal("${entity.customName?.string ?: "Camera"} ${entity.uuid}")
             }
         } }
-        UseBlockCallback.EVENT.register { player,level,hand,hit ->
-            val entity = level.getBlockEntity(hit.blockPos) as? ScreenBlockEntity
-            if (entity != null && level.isClientSide && !player.isShiftKeyDown && player.getItemInHand(hand).item !== WorldResources.bindingTool) {
-                Minecraft.getInstance().gui.setScreen(ScreenEditor(entity))
-                InteractionResult.SUCCESS
-            } else InteractionResult.PASS
-        }
+    }
+
+    /**
+     * Opens the base editor for [pos] when the click targets a screen base.
+     *
+     * Called from [net.astrorbits.differangle.mixin.client.InteractionScreenMixin] at the head of
+     * `Minecraft.startUseItem`. The Fabric `UseBlockCallback` event is deliberately not used for this:
+     * in Fabric API 0.160.0+26.2 its client config wires the event inside
+     * `MultiPlayerGameModeMixin.interactBlock`, a method 26.2 no longer has (the client path is
+     * `useItemOn`), so the client never fires it and the editor could only ever open on the server side.
+     *
+     * Requires an empty interaction: sneaking and the binding tool keep their own meaning on a base
+     * (clear / push bindings). Returns true when the editor opened, which also tells the caller to
+     * consume the click so a screen base is never treated as a normal block interaction.
+     */
+    @JvmStatic
+    fun openEditor(player: LocalPlayer, pos: BlockPos): Boolean {
+        val level = player.level()
+        val entity = level.getBlockEntity(pos) as? ScreenBlockEntity ?: return false
+        if (player.isShiftKeyDown || player.mainHandItem.item === WorldResources.bindingTool) return false
+        return runCatching { Minecraft.getInstance().gui.setScreen(ScreenEditor(entity)) }
+            .onFailure { LOGGER.error("differangle: could not open the screen editor at {}", pos, it) }
+            .isSuccess
     }
     fun tick(client: Minecraft,runtime: CameraRuntime) {
         val level = client.level
