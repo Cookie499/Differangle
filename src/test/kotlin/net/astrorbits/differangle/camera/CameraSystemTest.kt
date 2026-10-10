@@ -12,11 +12,13 @@ class CameraSystemTest {
     private class Backend : CameraBackend<Target> {
         val targets = mutableListOf<Target>()
         val renders = mutableListOf<String>()
+        val renderedDefinitions = mutableListOf<CameraDefinition>()
         val draws = mutableListOf<Pair<String, Target>>()
         var duringRender: () -> Unit = {}
         override fun createTarget(camera: CameraDefinition) = Target().also(targets::add)
         override fun renderCamera(camera: CameraDefinition, target: Target) {
             renders += camera.id
+            renderedDefinitions += camera
             duringRender()
         }
         override fun renderScreen(screen: ScreenDefinition, frame: CameraFrame<Target>, mainOrigin: Position) {
@@ -66,7 +68,7 @@ class CameraSystemTest {
         assertEquals(listOf("a"), backend.renders)
     }
 
-    @Test fun `camera changes invalidate the target and removal retains screen bindings`() {
+    @Test fun `camera resize invalidates the target and removal retains screen bindings`() {
         val backend = Backend()
         val system = CameraSystem(backend)
         val camera = CameraDefinition("a")
@@ -85,6 +87,63 @@ class CameraSystemTest {
         assertEquals(listOf(1, 1), backend.targets.map { it.closes })
         system.clear()
         assertEquals(listOf(1, 1), backend.targets.map { it.closes })
+    }
+
+    @Test fun `continuous pose and lens edits reuse the image target and respect the refresh deadline`() {
+        val backend = Backend()
+        val system = CameraSystem(backend)
+        val camera = CameraDefinition("a", updateRate = 10)
+        system.putCamera(camera)
+        system.putScreen(ScreenDefinition("s", "a"))
+        system.renderFrame(0, listOf("s"), Position())
+        val original = system.frame("a")!!
+        var latest = camera
+        repeat(50) { i ->
+            latest = camera.copy(position = Position(i.toDouble(), 2.0, 3.0),
+                rotation = Rotation.minecraftDegrees(i.toFloat(), 10f), fov = 70f + i,
+                nearPlane = 0.1f, farPlane = 512f, priority = i)
+            system.putCamera(latest)
+            assertSame(original, system.frame("a"))
+            assertEquals(FrameStatistics(0, 1, 1), system.renderFrame(i + 1L, listOf("s"), Position()))
+        }
+        assertEquals(FrameStatistics(1, 1, 1), system.renderFrame(camera.intervalNanos, listOf("s"), Position()))
+        assertEquals(listOf(camera, latest), backend.renderedDefinitions)
+        assertSame(original.target, system.frame("a")!!.target)
+        assertEquals(1, backend.targets.size)
+        assertEquals(0, original.target.closes)
+    }
+
+    @Test fun `moving cameras retain their place in the update budget`() {
+        val backend = Backend()
+        val system = CameraSystem(backend)
+        val ids = listOf("a", "b", "c")
+        ids.forEach {
+            system.putCamera(CameraDefinition(it))
+            system.putScreen(ScreenDefinition(it, it))
+        }
+        repeat(9) { i ->
+            system.cameras().forEach { system.putCamera(it.copy(position = Position(i.toDouble()))) }
+            system.renderFrame(i * 1_000_000_000L, ids, Position())
+        }
+        assertEquals(ids + ids + ids, backend.renders)
+        assertEquals(3, backend.targets.size)
+        assertTrue(backend.targets.all { it.closes == 0 })
+    }
+
+    @Test fun `disabling releases the target and enabling renders immediately`() {
+        val backend = Backend()
+        val system = CameraSystem(backend)
+        val camera = CameraDefinition("a")
+        system.putCamera(camera)
+        system.putScreen(ScreenDefinition("s", "a"))
+        system.renderFrame(0, listOf("s"), Position())
+        system.putCamera(camera.copy(enabled = false))
+        assertNull(system.frame("a"))
+        assertEquals(1, backend.targets.single().closes)
+        assertEquals(FrameStatistics(0, 0, 0), system.renderFrame(1, listOf("s"), Position()))
+        system.putCamera(camera)
+        assertEquals(FrameStatistics(1, 1, 1), system.renderFrame(2, listOf("s"), Position()))
+        assertEquals(2, backend.targets.size)
     }
 
     @Test fun `last screen removal or rebinding releases its old camera resources`() {

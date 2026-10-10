@@ -10,7 +10,7 @@ import net.irisshaders.iris.api.v0.IrisApi
 import javax.imageio.ImageIO
 import java.awt.image.BufferedImage
 
-/** Opt-in GPU test: two independent shader cameras, toggles, resized targets and resource reload. */
+/** Opt-in GPU test: independent moving shader cameras, toggles, resized targets and resource reload. */
 class CameraShaderGameTest : FabricClientGameTest {
     override fun runTest(context: ClientGameTestContext) {
         check(IrisApi.getInstance().isShaderPackInUse)
@@ -41,6 +41,7 @@ class CameraShaderGameTest : FabricClientGameTest {
             println("SHADER PIXELS PASS: $changes changed screen pixels")
             context.runOnClient<RuntimeException> { DifferangleClient.runtime.setCameraShaderRendering(true) }
             await(context)
+            movingCameras(context)
             context.runOnClient<RuntimeException> {
                 val runtime = DifferangleClient.runtime
                 runtime.system.putCamera(runtime.system.cameras().first { it.id == "shader-a" }.copy(resolution = Resolution(640, 360)))
@@ -62,8 +63,48 @@ class CameraShaderGameTest : FabricClientGameTest {
             }
             context.waitTicks(20)
             screenshot(context, "shader-main-after-clear")
-            println("SHADER LIFECYCLE PASS: two cameras, resize, resource reload, Iris off/on, clear")
+            println("SHADER LIFECYCLE PASS: moving cameras, resize, resource reload, Iris off/on, clear")
         }
+    }
+    private fun movingCameras(context: ClientGameTestContext) {
+        val initial = mutableMapOf<String, CameraFrame<net.astrorbits.differangle.client.render.TextureCameraTarget>>()
+        val definitions = mutableListOf<CameraDefinition>()
+        context.runOnClient<RuntimeException> {
+            val system = DifferangleClient.runtime.system
+            definitions.addAll(system.cameras())
+            definitions.forEach { initial[it.id] = requireNotNull(system.frame(it.id)) }
+        }
+        repeat(40) { tick ->
+            context.runOnClient<RuntimeException> {
+                val runtime = DifferangleClient.runtime
+                for (camera in definitions) {
+                    runtime.system.putCamera(camera.copy(
+                        position = camera.position.copy(x = camera.position.x + (tick % 8 - 4) * 0.1),
+                        rotation = Rotation.minecraftDegrees(if (camera.id == "shader-a") tick % 10 - 5f else 175f + tick % 10, 8f),
+                    ))
+                    check(runtime.system.frame(camera.id)?.target === initial.getValue(camera.id).target) {
+                        "Moving ${camera.id} discarded its shader target/history"
+                    }
+                }
+                check(runtime.lastFailure == null) { "Moving shader camera failed: ${runtime.lastFailure}" }
+            }
+            context.waitTick()
+            if (tick % 10 == 9) screenshot(context, "shader-moving-$tick")
+        }
+        context.runOnClient<RuntimeException> {
+            val runtime = DifferangleClient.runtime
+            definitions.forEach { camera ->
+                val frame = requireNotNull(runtime.system.frame(camera.id))
+                check(frame.target === initial.getValue(camera.id).target)
+                check(frame.renderedAtNanos > initial.getValue(camera.id).renderedAtNanos) {
+                    "Moving ${camera.id} stopped refreshing"
+                }
+                runtime.system.putCamera(camera)
+            }
+            check(runtime.lastFailure == null) { "Moving shader camera failed: ${runtime.lastFailure}" }
+        }
+        await(context)
+        println("SHADER MOTION PASS: 40 pose updates retained both targets and refreshed their output")
     }
     private fun await(context: ClientGameTestContext) {
         context.waitFor({

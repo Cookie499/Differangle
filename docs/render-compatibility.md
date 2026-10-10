@@ -20,6 +20,8 @@
 
 每台摄像机额外承担一套光影管线、阴影贴图与中间缓冲的成本；同一摄像机绑定的屏幕继续共享结果，按 Camera FPS 更新。建议试测从一至两台、较低分辨率与 FPS 开始。此版不支持使用 SSBO 的光影包，会报告明确错误；未验证 Distant Horizons、光线追踪光影包、所有自定义材质扩展和跨维度摄像机。自动曝光、TAA 和反射质量仍受摄像机更新频率影响。
 
+摄像机移动、旋转或修改镜头参数时复用原有 Target、Iris 管线及历史帧，继续按 Camera FPS 更新；等待刷新或本帧预算不足时显示上一张完整画面。修改分辨率、关闭或移除摄像机、资源重载仍会释放对应资源，避免移动时反复编译光影和重置曝光造成闪白、卡顿。
+
 光影地形使用摄像机自己的 `ChunkRenderList`，经 Sodium 的原生 `ChunkRenderer` 交给 Iris。绘制前后清除借用 region 的批次缓存，避免主视角复用摄像机批次。除基础后端的两处 Sodium 反射外，试验后端针对 Iris 1.11 访问 `PipelineManager.pipeline` 和 `IrisRenderingPipeline.initializedBlockIds`，用于临时切换管线并复用主管线已建立的相同材质映射；升级 Iris 时需要检查。
 
 ## 范围与限制

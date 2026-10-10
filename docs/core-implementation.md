@@ -36,7 +36,7 @@
 | 调度 | 默认每帧最多更新一个 Camera；默认 256×144、15 FPS、70° FOV |
 | 公平性 | 从未渲染的 Camera 优先，然后按最长未刷新时间排序；同龄时使用优先级和 ID |
 | 帧缓存 | 多 Screen 共用 Target；未到 FPS 截止时间复用；不可见时暂停更新、保留缓存 |
-| 失效与释放 | Camera 配置改变立即失效；最后一个 Screen 移除/改绑时释放旧 Camera Target；删除 Camera 同时删除其 Screen |
+| 失效与释放 | Camera 移动、转向及镜头/FPS/优先级修改保留 Target 与刷新时间；分辨率改变或关闭时释放；最后一个 Screen 移除/改绑时释放旧 Camera Target；删除 Camera 保留 Screen 绑定 |
 | 异常处理 | Camera 绘制失败销毁可能被部分覆盖的 Target，下次可立即重试；拒绝递归渲染及绘制中的注册表修改 |
 | TextureCameraBackend | 使用 26.2 TextureTarget 创建独立 RGBA8 颜色及深度资源，要求调用方提供真实世界/表面绘制函数 |
 | 客户端生命周期 | 安装后端时释放旧系统；世界引用改变或客户端停止时清理资源 |

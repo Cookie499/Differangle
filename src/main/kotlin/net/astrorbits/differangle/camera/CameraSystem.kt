@@ -21,8 +21,11 @@ class CameraSystem<T : CameraTarget>(
 
     fun putCamera(camera: CameraDefinition) {
         checkIdle()
-        if (cameras[camera.id] == camera) return
-        release(camera.id)
+        val previous = cameras[camera.id]
+        if (previous == camera) return
+        // Pose/lens edits keep both the last complete image and its refresh deadline.
+        // Reallocating on movement also rebuilds the Iris pipeline and loses temporal history.
+        if (previous?.resolution != camera.resolution || !camera.enabled) release(camera.id)
         cameras[camera.id] = camera
     }
 
