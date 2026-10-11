@@ -81,7 +81,8 @@ class CameraRuntime : AutoCloseable {
     private var renderer: CameraWorldRenderer? = null
     private val environments = CameraEnvironmentSampler()
     private var context: LevelRenderContext? = null
-    private val prepared = mutableMapOf<Pair<String, Resolution>, PreparedCameraView>()
+    private data class ViewKey(val id: String, val resolution: Resolution, val embedded: Boolean)
+    private val prepared = mutableMapOf<ViewKey, PreparedCameraView>()
     private data class MirrorFrame(
         val target: TextureTarget,
         var definition: CameraDefinition,
@@ -305,7 +306,7 @@ class CameraRuntime : AutoCloseable {
                     try {
                         // Embedded draws this screen itself, so its own pixels shape the picture: the screen's
                         // resolution aspect is the stretch it shows, independent of what other screens ask for.
-                        gpu.draw(prepare(source.copy(resolution = screen.resolution)),
+                        gpu.draw(prepare(source.copy(resolution = screen.resolution), embedded = true),
                             gpu.compositor.embedded(screen, origin, camera.viewRotationMatrix, target))
                         directDraws++
                     } catch (failure: Exception) {
@@ -346,13 +347,14 @@ class CameraRuntime : AutoCloseable {
         }
     }
 
-    /** One prepared view per camera and picture shape: Embedded gives every screen its own resolution. */
-    private fun prepare(camera: CameraDefinition) = prepared.getOrPut(camera.id to camera.resolution) {
-        val client = Minecraft.getInstance()
-        val loadedDistance = (client.options.effectiveRenderDistance * 16).toFloat()
-        renderer!!.prepare(camera, context!!.levelRenderer(), environments.sample(world!!, camera,
-            client.deltaTracker.getGameTimeDeltaPartialTick(false), loadedDistance))
-    }
+    /** Embedded and its Texture overflow need different terrain data, even for the same camera/shape. */
+    private fun prepare(camera: CameraDefinition, embedded: Boolean = false) =
+        prepared.getOrPut(ViewKey(camera.id, camera.resolution, embedded)) {
+            val client = Minecraft.getInstance()
+            val loadedDistance = (client.options.effectiveRenderDistance * 16).toFloat()
+            renderer!!.prepare(camera, context!!.levelRenderer(), environments.sample(world!!, camera,
+                client.deltaTracker.getGameTimeDeltaPartialTick(false), loadedDistance), embedded)
+        }
 
     private fun drawTexture(camera: CameraDefinition, target: TextureTarget) {
         check(context != null) { "Camera renders must run in the world render event" }

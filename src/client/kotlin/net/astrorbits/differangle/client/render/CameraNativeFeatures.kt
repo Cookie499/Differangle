@@ -62,10 +62,11 @@ class CameraNativeFeatures(private val layers: CameraLayers) : AutoCloseable {
     fun beginFrame() { entityCount = 0; blockEntityCount = 0; particleCount = 0; weatherColumns = 0; cloudViews = 0 }
 
     fun draw(context: CameraDrawContext, translucentTerrain: () -> Unit,
-             beforeWorld: () -> Unit = {}, beforeTranslucents: () -> Unit = {}) {
+             beforeWorld: () -> Unit = {}, beforeTranslucents: () -> Unit = {},
+             observer: VirtualCamera? = null) {
         val level = client.level ?: return
         val target = requireNotNull(context.output.target)
-        val camera = VirtualCamera(context.view.camera, level)
+        val camera = observer ?: VirtualCamera(context.view.camera, level)
         val zeroToOne = RenderSystem.getDevice().deviceInfo.isZZeroToOne
         val state = camera.renderState(zeroToOne)
         val partial = client.deltaTracker.getGameTimeDeltaPartialTick(false)

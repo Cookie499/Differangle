@@ -47,11 +47,15 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
 
     fun beginFrame() { terrain.beginFrame(); nativeFeatures.beginFrame(); shaderCameras?.beginFrame() }
 
-    fun prepare(camera: CameraDefinition, renderer: LevelRenderer, environment: CameraEnvironment): PreparedCameraView {
+    fun prepare(camera: CameraDefinition, renderer: LevelRenderer, environment: CameraEnvironment,
+                embedded: Boolean = false): PreparedCameraView {
         val atlas = Minecraft.getInstance().atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS)
         val sun = atlas.getSprite(Identifier.withDefaultNamespace("sun"))
         val moon = atlas.getSprite(Identifier.withDefaultNamespace("moon/${environment.moonPhase.serializedName}"))
-        return PreparedCameraView(camera, terrain.prepare(camera, renderer, CameraLayer.TRANSLUCENT in layers), environment,
+        val preparedTerrain = if (cameraShaders && !embedded && RendererCompatibility.shadersEnabled()) {
+            shaderBackend().prepare(camera)
+        } else terrain.prepare(camera, renderer, CameraLayer.TRANSLUCENT in layers)
+        return PreparedCameraView(camera, preparedTerrain, environment,
             environments.writeUniform(EnvironmentUniform(environment, uv(sun), uv(moon))))
     }
 
@@ -65,8 +69,7 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
             client.gameRenderer.levelLightmap(), client.atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS).textureView,
             client.textureManager.getTexture(Identifier.withDefaultNamespace("textures/environment/end_sky.png")).textureView)
         if (cameraShaders && !output.embedded && RendererCompatibility.shadersEnabled()) {
-            val shaders = shaderCameras ?: net.astrorbits.differangle.client.render.compat.IrisShaderCameras().also { shaderCameras = it }
-            shaders.draw(context, nativeFeatures, layers)
+            shaderBackend().draw(context, nativeFeatures, layers)
             return
         }
         stages.forEach { it.draw(context) }
@@ -76,6 +79,9 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
             terrain.drawLayer(context, true)
         }
     }
+
+    private fun shaderBackend() = shaderCameras
+        ?: net.astrorbits.differangle.client.render.compat.IrisShaderCameras().also { shaderCameras = it }
 
     fun endFrame() {
         stages.forEach { it.endFrame() }

@@ -5,7 +5,9 @@ import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.vertex.PoseStack
 import net.astrorbits.differangle.camera.CameraLayer
 import net.astrorbits.differangle.camera.CameraLayers
+import net.astrorbits.differangle.camera.CameraDefinition
 import net.astrorbits.differangle.client.render.*
+import net.caffeinemc.mods.sodium.api.texture.SpriteUtil
 import net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer
 import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices
 import net.caffeinemc.mods.sodium.client.render.chunk.UniformBufferManager
@@ -29,6 +31,7 @@ import net.minecraft.client.renderer.state.level.SkyRenderState
 import net.minecraft.util.profiling.Profiler
 import net.minecraft.world.level.dimension.DimensionType.Skybox
 import net.minecraft.world.phys.AABB
+import net.minecraft.world.level.block.entity.BlockEntity
 import org.joml.Matrix4f
 import kotlin.math.floor
 
@@ -38,18 +41,27 @@ class IrisShaderCameras : AutoCloseable {
         fun close() { sky.close(); uniforms.delete(); pipeline.destroy() }
     }
     private val entries = mutableMapOf<String, Entry>()
+    private val prepared = mutableMapOf<CameraDefinition, Visibility>()
     private var mainGeneration: Any? = null
     var terrainDraws = 0; private set
-    fun beginFrame() { terrainDraws = 0 }
+    fun beginFrame() { terrainDraws = 0; prepared.clear() }
     private val client = Minecraft.getInstance()
     private val pipelineField = PipelineManager::class.java.getDeclaredField("pipeline").apply { isAccessible = true }
     private val initializedField = IrisRenderingPipeline::class.java.getDeclaredField("initializedBlockIds").apply { isAccessible = true }
 
+    /** Shader rendering needs native lists and block entities, not expanded fallback TerrainDraws. */
+    fun prepare(definition: CameraDefinition): SharedTerrainRenderer.PreparedTerrain {
+        val visibility = Visibility(definition)
+        prepared[definition] = visibility
+        return SharedTerrainRenderer.PreparedTerrain(definition, emptyList(), visibility.sections, visibility.blockEntities.toList())
+    }
+
     fun draw(context: CameraDrawContext, features: CameraNativeFeatures, layers: CameraLayers) {
         val manager = Iris.getPipelineManager()
         val main = manager.pipelineNullable ?: error("Iris has no active pipeline")
-        if (mainGeneration !== main) { close(); mainGeneration = main }
-        val camera = VirtualCamera(context.view.camera, requireNotNull(client.level))
+        val visibility = requireNotNull(prepared.remove(context.view.camera)) { "Shader terrain was not prepared" }
+        if (mainGeneration !== main) { releasePipelines(); mainGeneration = main }
+        val camera = visibility.camera
         val target = requireNotNull(context.output.target)
         val captured = CapturedRenderingState.INSTANCE
         val oldView = Matrix4f(captured.gbufferModelView)
@@ -97,7 +109,7 @@ class IrisShaderCameras : AutoCloseable {
             val fog = context.view.environment.fogColor
             captured.setFogColor(fog.x, fog.y, fog.z)
             client.gameRenderer.gameRenderState().levelRenderState.cameraRenderState = state
-            val terrain = CameraTerrain(context, entry.uniforms)
+            val terrain = CameraTerrain(context, entry.uniforms, visibility)
             try {
                 features.draw(context,
                     translucentTerrain = {
@@ -118,6 +130,7 @@ class IrisShaderCameras : AutoCloseable {
                         entry.pipeline.setPhase(WorldRenderingPhase.NONE)
                     },
                     beforeTranslucents = { entry.pipeline.beginHand(); entry.pipeline.beginTranslucents() },
+                    observer = camera,
                 )
                 entry.pipeline.finalizeLevelRendering()
                 terrainDraws += terrain.draws
@@ -155,23 +168,19 @@ class IrisShaderCameras : AutoCloseable {
         }
     }
 
-    /** Independent visibility lists; never consume or replace the main camera's occlusion result. */
-    private class CameraTerrain(val context: CameraDrawContext, val uniforms: UniformBufferManager) : AutoCloseable {
-        var draws = 0; private set
+    /** One visibility traversal for shader lists, animated sprites and block entities. */
+    private class Visibility(val definition: CameraDefinition) {
         private val manager = requireNotNull(SodiumTerrain.sectionManager(requireNotNull(SodiumWorldRenderer.instanceNullable())))
-        private val lists = linkedMapOf<RenderRegion, ChunkRenderList>()
-        private val definition = context.view.camera
-        private val matrices = ChunkRenderMatrices(RendererCompatibility.projection(definition,
-            RenderSystem.getDevice().deviceInfo.isZZeroToOne), definition.viewMatrix())
-        private val fog = context.view.environment.let {
-            FogParameters(it.fogColor.x, it.fogColor.y, it.fogColor.z, it.fogColor.w,
-                it.fog.environmentalStart, it.fog.environmentalEnd, it.fog.renderDistanceStart, it.fog.renderDistanceEnd)
-        }
+        val lists = linkedMapOf<RenderRegion, ChunkRenderList>()
+        val blockEntities = linkedSetOf<BlockEntity>()
+        val camera = VirtualCamera(definition, requireNotNull(Minecraft.getInstance().level))
+        var sections = 0; private set
+        val ordered: List<ChunkRenderList>
         init {
             val client = Minecraft.getInstance()
             val level = requireNotNull(client.level)
             val storage = requireNotNull(SodiumTerrain.sectionStorage(manager))
-            val frustum = VirtualCamera(definition, level).cullFrustum
+            val frustum = camera.cullFrustum
             val radius = client.options.effectiveRenderDistance
             val cx = floor(definition.position.x / 16).toInt()
             val cz = floor(definition.position.z / 16).toInt()
@@ -180,36 +189,63 @@ class IrisShaderCameras : AutoCloseable {
                     val section = storage.getCurrent(x, y, z) ?: continue
                     if (!section.isBuilt || section.isDisposed) continue
                     if (!frustum.isVisible(AABB(x * 16.0, y * 16.0, z * 16.0, x * 16.0 + 16, y * 16.0 + 16, z * 16.0 + 16))) continue
-                    lists.getOrPut(section.region) { ChunkRenderList(section.region) }.add(section.sectionIndex)
+                    val region = section.region
+                    val index = section.sectionIndex
+                    region.getAnimatedSprites(index)?.forEach { SpriteUtil.INSTANCE.markSpriteActive(it) }
+                    region.getCulledBlockEntities(index)?.let { blockEntities.addAll(it) }
+                    region.getGlobalBlockEntities(index)?.let { blockEntities.addAll(it) }
+                    lists.getOrPut(region) { ChunkRenderList(region) }.add(index)
+                    sections++
                 }
             }
-        }
-        fun draw(translucent: Boolean) {
-            lists.keys.forEach { it.clearAllCachedBatches() }
-            uniforms.prepareFrame(); uniforms.update(matrices, fog)
-            val ordered = lists.values.sortedBy {
+            ordered = lists.values.sortedBy {
                 val r = it.region
                 val dx = r.chunkX * 16.0 + 64 - definition.position.x
                 val dy = r.chunkY * 16.0 + 32 - definition.position.y
                 val dz = r.chunkZ * 16.0 + 64 - definition.position.z
                 dx * dx + dy * dy + dz * dz
             }
+        }
+    }
+
+    /** Independent visibility lists; never consume or replace the main camera's occlusion result. */
+    private class CameraTerrain(val context: CameraDrawContext, val uniforms: UniformBufferManager,
+                                val visibility: Visibility) : AutoCloseable {
+        var draws = 0; private set
+        private val manager = requireNotNull(SodiumTerrain.sectionManager(requireNotNull(SodiumWorldRenderer.instanceNullable())))
+        private val definition = context.view.camera
+        private val matrices = ChunkRenderMatrices(RendererCompatibility.projection(definition,
+            RenderSystem.getDevice().deviceInfo.isZZeroToOne), definition.viewMatrix())
+        private val fog = context.view.environment.let {
+            FogParameters(it.fogColor.x, it.fogColor.y, it.fogColor.z, it.fogColor.w,
+                it.fog.environmentalStart, it.fog.environmentalEnd, it.fog.renderDistanceStart, it.fog.renderDistanceEnd)
+        }
+        private var uniformsReady = false
+        fun draw(translucent: Boolean) {
+            visibility.lists.keys.forEach { it.clearAllCachedBatches() }
+            if (!uniformsReady) {
+                uniforms.prepareFrame(); uniforms.update(matrices, fog)
+                uniformsReady = true
+            }
+            val ordered = visibility.ordered
             val iterable = ChunkRenderListIterable { reverse -> (if (reverse) ordered.asReversed() else ordered).iterator() }
             val passes = if (translucent) listOf(DefaultTerrainRenderPasses.TRANSLUCENT)
                 else listOf(DefaultTerrainRenderPasses.SOLID, DefaultTerrainRenderPasses.CUTOUT)
             for (pass in passes) manager.chunkRenderer.render(matrices, iterable, pass,
                 CameraTransform(definition.position.x, definition.position.y, definition.position.z), fog, true,
                 RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST, true), uniforms.uniformBuffer, uniforms.sectionTimeInfo)
-            draws += lists.size * passes.size
+            draws += visibility.lists.size * passes.size
         }
-        override fun close() { lists.keys.forEach { it.clearAllCachedBatches() } }
+        override fun close() { visibility.lists.keys.forEach { it.clearAllCachedBatches() } }
     }
 
     fun endFrame() {
+        prepared.clear()
         entries.entries.removeIf { (_, entry) ->
             if (entry.target.colorTexture == null) { entry.close(); true }
             else { entry.uniforms.endFrame(); false }
         }
     }
-    override fun close() { entries.values.forEach { it.close() }; entries.clear(); mainGeneration = null }
+    private fun releasePipelines() { entries.values.forEach { it.close() }; entries.clear() }
+    override fun close() { prepared.clear(); releasePipelines(); mainGeneration = null }
 }

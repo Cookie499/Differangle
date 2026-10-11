@@ -24,6 +24,8 @@
 
 光影地形使用摄像机自己的 `ChunkRenderList`，经 Sodium 的原生 `ChunkRenderer` 交给 Iris。绘制前后清除借用 region 的批次缓存，避免主视角复用摄像机批次。除基础后端的两处 Sodium 反射外，试验后端针对 Iris 1.11 访问 `PipelineManager.pipeline` 和 `IrisRenderingPipeline.initializedBlockIds`，用于临时切换管线并复用主管线已建立的相同材质映射；升级 Iris 时需要检查。
 
+光影准备现在单次遍历摄像机可见区块，同时收集原生列表、方块实体与动画精灵，不再先生成未用于光影绘制的基础 `TerrainDraw`。同次刷新复用虚拟相机、region 顺序及地形 uniform；Embedded 与其 Texture 溢出缓存分别准备所需数据。三屏共享单台 1440×960、配置 60 FPS 的 BSL 客户端回归覆盖了这些路径；该检查验证画面与生命周期，不代表实际达到 60 FPS 或量化性能提升。进一步性能梳理见[性能审查](render-performance-review.md)。
+
 ## 范围与限制
 
 只读取客户端已经加载并完成网格编译的区块，不为远程摄像机请求额外区块。半透明区块间按摄像机距离排序；区块内部沿用 Sodium 上传的索引顺序，不改写其主视角排序缓冲区。复杂交叠透明面可能仍存在排序差异。

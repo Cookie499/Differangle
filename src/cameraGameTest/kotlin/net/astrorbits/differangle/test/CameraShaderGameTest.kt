@@ -19,6 +19,7 @@ class CameraShaderGameTest : FabricClientGameTest {
                 "gamerule minecraft:advance_time false", "fill -8 -61 16 8 -61 34 quartz_block",
                 "fill -3 -60 30 3 -57 30 red_concrete", "fill -3 -60 18 3 -57 18 blue_concrete",
                 "fill -2 -60 25 -1 -58 25 blue_stained_glass", "fill 1 -60 25 2 -60 26 water",
+                "setblock 1 -60 27 chest",
                 "summon minecraft:pig 0.5 -60 26 {NoAI:1b,NoGravity:1b}")) world.server.runCommand(command)
             context.waitTicks(100)
             context.runOnClient<RuntimeException> { client ->
@@ -56,6 +57,7 @@ class CameraShaderGameTest : FabricClientGameTest {
                 await(context)
                 screenshot(context, "shader-iris-toggle-$enabled")
             }
+            sharedScreens(context)
             context.runOnClient<RuntimeException> {
                 val runtime = DifferangleClient.runtime
                 check(NativeCameraScope.target == null && ShaderCameraContext.target == null)
@@ -63,8 +65,39 @@ class CameraShaderGameTest : FabricClientGameTest {
             }
             context.waitTicks(20)
             screenshot(context, "shader-main-after-clear")
-            println("SHADER LIFECYCLE PASS: moving cameras, resize, resource reload, Iris off/on, clear")
+            println("SHADER LIFECYCLE PASS: moving cameras, resize, resource reload, Iris off/on, shared screens, clear")
         }
+    }
+    private fun sharedScreens(context: ClientGameTestContext) {
+        context.runOnClient<RuntimeException> {
+            val runtime = DifferangleClient.runtime
+            runtime.system.putScreen(runtime.system.screens().first { it.id == "shader-b" }.copy(cameraId = "shader-a"))
+            runtime.system.removeCamera("shader-b")
+            runtime.system.putScreen(ScreenDefinition("shader-c", "shader-a", Position(.5, -56.8, 5.0),
+                Rotation.minecraftDegrees(0f, 0f), width = 1.7f, height = 1.0f))
+            runtime.system.putCamera(runtime.system.cameras().single().copy(resolution = Resolution(1440, 960), updateRate = 60))
+        }
+        for (mode in listOf(CameraMode.TEXTURE, CameraMode.EMBEDDED)) {
+            context.runOnClient<RuntimeException> { DifferangleClient.runtime.switchMode(mode) }
+            context.waitFor({
+                val runtime = DifferangleClient.runtime
+                check(runtime.lastError == null && runtime.lastFailure == null)
+                runtime.statistics.screenDraws == 3 && runtime.drawCalls > 0 && runtime.nativeFeatures.blockEntities > 0
+            }, 600)
+            context.waitTicks(20)
+            context.runOnClient<RuntimeException> {
+                val runtime = DifferangleClient.runtime
+                check(runtime.lastFailure == null)
+                check(runtime.statistics.cachedCameraCount == 1)
+                if (mode == CameraMode.TEXTURE) {
+                    check(runtime.statistics.cameraUpdates <= 1) { "Shared screens rendered the camera more than once" }
+                    val target = requireNotNull(runtime.system.frame("shader-a")).target.renderTarget
+                    check(target.width == 1440 && target.height == 960)
+                }
+            }
+            screenshot(context, "shader-shared-three-${mode.commandName}")
+        }
+        println("SHADER SHARING PASS: three screens, one 1440x960 camera at configured 60 FPS, Texture and Embedded overflow")
     }
     private fun movingCameras(context: ClientGameTestContext) {
         val initial = mutableMapOf<String, CameraFrame<net.astrorbits.differangle.client.render.TextureCameraTarget>>()
@@ -110,7 +143,7 @@ class CameraShaderGameTest : FabricClientGameTest {
         context.waitFor({
             val runtime = DifferangleClient.runtime
             check(runtime.lastError == null) { runtime.lastError!! }
-            runtime.statistics.screenDraws == 2 && runtime.drawCalls > 0
+            runtime.statistics.screenDraws == 2 && runtime.drawCalls > 0 && runtime.nativeFeatures.blockEntities > 0
         }, 600)
         context.waitTicks(40)
         context.runOnClient<RuntimeException> { check(DifferangleClient.runtime.lastError == null) }
