@@ -16,7 +16,9 @@
         "ParticleEngineAccessor",
         "ParticleGroupAccessor",
         "EarlyAtlasAnimationMixin",
-        "InteractionScreenMixin"
+        "InteractionScreenMixin",
+        "BetterF3MoonPhaseMixin",
+        "Blaze3DValidationMixin"
     ],
     "injectors": {
         "defaultRequire": 1
