@@ -52,7 +52,7 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
         val atlas = Minecraft.getInstance().atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS)
         val sun = atlas.getSprite(Identifier.withDefaultNamespace("sun"))
         val moon = atlas.getSprite(Identifier.withDefaultNamespace("moon/${environment.moonPhase.serializedName}"))
-        val preparedTerrain = if (cameraShaders && !embedded && RendererCompatibility.shadersEnabled()) {
+        val preparedTerrain = if (cameraShaders && !embedded && !camera.mirrored && RendererCompatibility.shadersEnabled()) {
             shaderBackend().prepare(camera)
         } else terrain.prepare(camera, renderer, CameraLayer.TRANSLUCENT in layers)
         return PreparedCameraView(camera, preparedTerrain, environment,
@@ -68,7 +68,7 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
             client.atlasManager.getAtlasOrThrow(AtlasIds.BLOCKS).textureView,
             client.gameRenderer.levelLightmap(), client.atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS).textureView,
             client.textureManager.getTexture(Identifier.withDefaultNamespace("textures/environment/end_sky.png")).textureView)
-        if (cameraShaders && !output.embedded && RendererCompatibility.shadersEnabled()) {
+        if (cameraShaders && !output.embedded && !view.camera.mirrored && RendererCompatibility.shadersEnabled()) {
             shaderBackend().draw(context, nativeFeatures, layers)
             return
         }
