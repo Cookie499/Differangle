@@ -99,6 +99,17 @@ object CameraCommands {
                     runtime.lastFailure ?: runtime.compatibilityProblem() ?: Component.translatable("differangle.status.ready"),
                 )
             } })
+            root.then(literal("timings").executes { ctx -> run(ctx, runtime) {
+                val gpu = when {
+                    !runtime.gpuTimingsEnabled -> "gpu=off"
+                    runtime.gpuTotalMillis.isFinite() -> String.format(Locale.ROOT, "gpu=%.2fms", runtime.gpuTotalMillis)
+                    else -> "gpu=pending"
+                }
+                Component.literal(String.format(Locale.ROOT,
+                    "housing=%.2fms prepare=%.2fms world=%.2fms composite=%.2fms total=%.2fms %s",
+                    runtime.phaseHousingMillis, runtime.phasePrepareMillis, runtime.phaseWorldDrawMillis,
+                    runtime.phaseCompositeMillis, runtime.cpuMillis, gpu))
+            } })
             // Local (client-side) Camera/Screen definitions, not the world entities.
             root.then(literal("list").executes { ctx -> run(ctx, runtime) {
                 Component.literal(

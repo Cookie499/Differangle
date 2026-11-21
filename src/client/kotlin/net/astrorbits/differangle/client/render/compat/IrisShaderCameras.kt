@@ -14,6 +14,7 @@ import net.caffeinemc.mods.sodium.client.render.chunk.UniformBufferManager
 import net.caffeinemc.mods.sodium.client.render.chunk.lists.ChunkRenderList
 import net.caffeinemc.mods.sodium.client.render.chunk.lists.ChunkRenderListIterable
 import net.caffeinemc.mods.sodium.client.render.chunk.region.RenderRegion
+import net.caffeinemc.mods.sodium.client.render.chunk.storage.SectionStorage
 import net.caffeinemc.mods.sodium.client.render.chunk.terrain.DefaultTerrainRenderPasses
 import net.caffeinemc.mods.sodium.client.render.viewport.CameraTransform
 import net.caffeinemc.mods.sodium.client.util.FogParameters
@@ -26,7 +27,9 @@ import net.irisshaders.iris.shadows.ShadowRenderer
 import net.irisshaders.iris.uniforms.CapturedRenderingState
 import net.irisshaders.iris.vertices.ImmediateState
 import net.minecraft.client.Minecraft
+import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.client.renderer.SkyRenderer
+import net.minecraft.client.renderer.culling.Frustum
 import net.minecraft.client.renderer.state.level.SkyRenderState
 import net.minecraft.util.profiling.Profiler
 import net.minecraft.world.level.dimension.DimensionType.Skybox
@@ -46,12 +49,16 @@ class IrisShaderCameras : AutoCloseable {
     var terrainDraws = 0; private set
     fun beginFrame() { terrainDraws = 0; prepared.clear() }
     private val client = Minecraft.getInstance()
+    private val config = net.astrorbits.differangle.client.ClientConfig()
+    private val visibilityCache = CameraVisibilityCache()
+    private val shadowGate = CameraShadowGate(config.loadShadowUpdateRate(), config.loadShadowAdaptive())
+    private val refreshCounters = mutableMapOf<String, Long>()
     private val pipelineField = PipelineManager::class.java.getDeclaredField("pipeline").apply { isAccessible = true }
     private val initializedField = IrisRenderingPipeline::class.java.getDeclaredField("initializedBlockIds").apply { isAccessible = true }
 
     /** Shader rendering needs native lists and block entities, not expanded fallback TerrainDraws. */
     fun prepare(definition: CameraDefinition): SharedTerrainRenderer.PreparedTerrain {
-        val visibility = Visibility(definition)
+        val visibility = Visibility(definition, visibilityCache.takeIf { config.loadVisibilityCache() })
         prepared[definition] = visibility
         return SharedTerrainRenderer.PreparedTerrain(definition, emptyList(), visibility.sections, visibility.blockEntities.toList())
     }
@@ -62,6 +69,9 @@ class IrisShaderCameras : AutoCloseable {
         val visibility = requireNotNull(prepared.remove(context.view.camera)) { "Shader terrain was not prepared" }
         if (mainGeneration !== main) { releasePipelines(); mainGeneration = main }
         val camera = visibility.camera
+        val cameraId = context.view.camera.id
+        val refreshIndex = refreshCounters.getOrDefault(cameraId, 0L)
+        refreshCounters[cameraId] = refreshIndex + 1
         val target = requireNotNull(context.output.target)
         val captured = CapturedRenderingState.INSTANCE
         val oldView = Matrix4f(captured.gbufferModelView)
@@ -87,6 +97,8 @@ class IrisShaderCameras : AutoCloseable {
             entries[context.view.camera.id]?.takeIf { it.target !== target }?.let {
                 entries.remove(context.view.camera.id)
                 it.close()
+                refreshCounters.remove(cameraId)
+                shadowGate.reset(cameraId)
             }
             val entry = entries.getOrPut(context.view.camera.id) {
                 val pack = Iris.getCurrentPack().orElseThrow()
@@ -109,7 +121,7 @@ class IrisShaderCameras : AutoCloseable {
             val fog = context.view.environment.fogColor
             captured.setFogColor(fog.x, fog.y, fog.z)
             client.gameRenderer.gameRenderState().levelRenderState.cameraRenderState = state
-            val terrain = CameraTerrain(context, entry.uniforms, visibility)
+            val terrain = CameraTerrain(context, entry.uniforms, visibility, config.loadBatchClearMerge())
             try {
                 features.draw(context,
                     translucentTerrain = {
@@ -117,12 +129,17 @@ class IrisShaderCameras : AutoCloseable {
                     },
                     beforeWorld = {
                         entry.pipeline.beginLevelRendering()
-                        Profiler.get().push("differangle_camera_shadows")
-                        try { entry.pipeline.renderShadows(client.levelRenderer as LevelRendererAccessor, camera, state) }
-                        finally { Profiler.get().pop() }
-                        // Shadow rendering restores the player's projection; restore this camera's projection too.
-                        captured.setGbufferModelView(state.viewRotationMatrix)
-                        captured.setGbufferProjection(state.projectionMatrix)
+                        if (shadowGate.shouldRender(cameraId, refreshIndex, context.view.environment.sunAngle,
+                                client.options.effectiveRenderDistance, ShadowRenderer.RESOLUTION,
+                                context.view.camera.fov, context.view.camera.nearPlane, context.view.camera.farPlane,
+                                context.view.camera.offAxis)) {
+                            Profiler.get().push("differangle_camera_shadows")
+                            try { entry.pipeline.renderShadows(client.levelRenderer as LevelRendererAccessor, camera, state) }
+                            finally { Profiler.get().pop() }
+                            // Shadow rendering restores the player's projection; restore this camera's projection too.
+                            captured.setGbufferModelView(state.viewRotationMatrix)
+                            captured.setGbufferProjection(state.projectionMatrix)
+                        }
                         entry.pipeline.onBeginClear()
                         drawSky(entry.sky, camera)
                         entry.pipeline.setPhase(WorldRenderingPhase.TERRAIN_SOLID)
@@ -169,12 +186,13 @@ class IrisShaderCameras : AutoCloseable {
     }
 
     /** One visibility traversal for shader lists, animated sprites and block entities. */
-    private class Visibility(val definition: CameraDefinition) {
+    private class Visibility(val definition: CameraDefinition, private val cache: CameraVisibilityCache?) {
         private val manager = requireNotNull(SodiumTerrain.sectionManager(requireNotNull(SodiumWorldRenderer.instanceNullable())))
         val lists = linkedMapOf<RenderRegion, ChunkRenderList>()
         val blockEntities = linkedSetOf<BlockEntity>()
         val camera = VirtualCamera(definition, requireNotNull(Minecraft.getInstance().level))
         var sections = 0; private set
+        var suspect = false; private set
         val ordered: List<ChunkRenderList>
         init {
             val client = Minecraft.getInstance()
@@ -182,12 +200,60 @@ class IrisShaderCameras : AutoCloseable {
             val storage = requireNotNull(SodiumTerrain.sectionStorage(manager))
             val frustum = camera.cullFrustum
             val radius = client.options.effectiveRenderDistance
+            val activeCache = cache
+            val key = activeCache?.keyFor(definition, radius, level.minSectionY, level.maxSectionY)
+            val skeleton = if (activeCache != null && key != null) activeCache.obtain(definition.id, key) else null
+            val cachedOrder = skeleton?.let { rebuildFromSkeleton(it, storage) }
+            ordered = if (cachedOrder != null) {
+                cachedOrder
+            } else {
+                lists.clear()
+                blockEntities.clear()
+                sections = 0
+                val sectionCoords = fullScan(storage, frustum, radius, level)
+                val sorted = lists.values.sortedBy { regionDistanceSquared(it.region) }
+                if (activeCache != null && key != null && !suspect) {
+                    activeCache.store(definition.id, key, CameraVisibilityCache.Skeleton(
+                        sectionCoords,
+                        sorted.map { CameraVisibilityCache.RegionCoord(it.region.chunkX, it.region.chunkY, it.region.chunkZ) },
+                    ))
+                }
+                sorted
+            }
+        }
+
+        /** Rebuilds fresh lists from a cached skeleton; returns null when any section vanished. */
+        private fun rebuildFromSkeleton(skeleton: CameraVisibilityCache.Skeleton, storage: SectionStorage): List<ChunkRenderList>? {
+            val byRegion = linkedMapOf<CameraVisibilityCache.RegionCoord, ChunkRenderList>()
+            for (coord in skeleton.sections) {
+                val section = storage.getCurrent(coord.x, coord.y, coord.z) ?: return null
+                if (section.isDisposed || !section.isBuilt) return null
+                val region = section.region
+                val index = section.sectionIndex
+                region.getAnimatedSprites(index)?.forEach { SpriteUtil.INSTANCE.markSpriteActive(it) }
+                region.getCulledBlockEntities(index)?.let { blockEntities.addAll(it) }
+                region.getGlobalBlockEntities(index)?.let { blockEntities.addAll(it) }
+                val regionCoord = CameraVisibilityCache.RegionCoord(region.chunkX, region.chunkY, region.chunkZ)
+                byRegion.getOrPut(regionCoord) { ChunkRenderList(region) }.add(index)
+                sections++
+            }
+            if (byRegion.size != skeleton.regionOrder.size || skeleton.regionOrder.any { it !in byRegion }) return null
+            for ((_, list) in byRegion) lists[list.region] = list
+            return skeleton.regionOrder.map { byRegion.getValue(it) }
+        }
+
+        private fun fullScan(storage: SectionStorage, frustum: Frustum, radius: Int, level: ClientLevel): List<CameraVisibilityCache.SectionCoord> {
+            val sectionCoords = mutableListOf<CameraVisibilityCache.SectionCoord>()
             val cx = floor(definition.position.x / 16).toInt()
             val cz = floor(definition.position.z / 16).toInt()
             for (x in cx - radius..cx + radius) for (z in cz - radius..cz + radius) {
                 for (y in level.minSectionY..level.maxSectionY) {
-                    val section = storage.getCurrent(x, y, z) ?: continue
-                    if (!section.isBuilt || section.isDisposed) continue
+                    val section = storage.getCurrent(x, y, z)
+                    if (section == null) continue
+                    if (!section.isBuilt || section.isDisposed) {
+                        suspect = true
+                        continue
+                    }
                     if (!frustum.isVisible(AABB(x * 16.0, y * 16.0, z * 16.0, x * 16.0 + 16, y * 16.0 + 16, z * 16.0 + 16))) continue
                     val region = section.region
                     val index = section.sectionIndex
@@ -195,22 +261,24 @@ class IrisShaderCameras : AutoCloseable {
                     region.getCulledBlockEntities(index)?.let { blockEntities.addAll(it) }
                     region.getGlobalBlockEntities(index)?.let { blockEntities.addAll(it) }
                     lists.getOrPut(region) { ChunkRenderList(region) }.add(index)
+                    sectionCoords.add(CameraVisibilityCache.SectionCoord(x, y, z))
                     sections++
                 }
             }
-            ordered = lists.values.sortedBy {
-                val r = it.region
-                val dx = r.chunkX * 16.0 + 64 - definition.position.x
-                val dy = r.chunkY * 16.0 + 32 - definition.position.y
-                val dz = r.chunkZ * 16.0 + 64 - definition.position.z
-                dx * dx + dy * dy + dz * dz
-            }
+            return sectionCoords
+        }
+
+        private fun regionDistanceSquared(region: RenderRegion): Double {
+            val dx = region.chunkX * 16.0 + 64 - definition.position.x
+            val dy = region.chunkY * 16.0 + 32 - definition.position.y
+            val dz = region.chunkZ * 16.0 + 64 - definition.position.z
+            return dx * dx + dy * dy + dz * dz
         }
     }
 
     /** Independent visibility lists; never consume or replace the main camera's occlusion result. */
     private class CameraTerrain(val context: CameraDrawContext, val uniforms: UniformBufferManager,
-                                val visibility: Visibility) : AutoCloseable {
+                                val visibility: Visibility, private val mergeBatchClears: Boolean) : AutoCloseable {
         var draws = 0; private set
         private val manager = requireNotNull(SodiumTerrain.sectionManager(requireNotNull(SodiumWorldRenderer.instanceNullable())))
         private val definition = context.view.camera
@@ -221,8 +289,12 @@ class IrisShaderCameras : AutoCloseable {
                 it.fog.environmentalStart, it.fog.environmentalEnd, it.fog.renderDistanceStart, it.fog.renderDistanceEnd)
         }
         private var uniformsReady = false
+        private var batchesClearedForRefresh = false
         fun draw(translucent: Boolean) {
-            visibility.lists.keys.forEach { it.clearAllCachedBatches() }
+            if (!mergeBatchClears || !batchesClearedForRefresh) {
+                visibility.lists.keys.forEach { it.clearAllCachedBatches() }
+                batchesClearedForRefresh = true
+            }
             if (!uniformsReady) {
                 uniforms.prepareFrame(); uniforms.update(matrices, fog)
                 uniformsReady = true
@@ -246,6 +318,12 @@ class IrisShaderCameras : AutoCloseable {
             else { entry.uniforms.endFrame(); false }
         }
     }
-    private fun releasePipelines() { entries.values.forEach { it.close() }; entries.clear() }
+    private fun releasePipelines() {
+        entries.values.forEach { it.close() }
+        entries.clear()
+        refreshCounters.clear()
+        shadowGate.clear()
+        visibilityCache.clear()
+    }
     override fun close() { prepared.clear(); releasePipelines(); mainGeneration = null }
 }

@@ -5,6 +5,7 @@ import com.mojang.blaze3d.systems.RenderSystem
 import net.astrorbits.differangle.camera.*
 import net.astrorbits.differangle.client.render.CameraWorldRenderer
 import net.astrorbits.differangle.client.render.CameraEnvironmentSampler
+import net.astrorbits.differangle.client.render.CameraGpuTimings
 import net.astrorbits.differangle.client.render.EmbeddedNativePipelines
 import net.astrorbits.differangle.client.render.MainViewEye
 import net.astrorbits.differangle.client.render.PreparedCameraView
@@ -71,6 +72,17 @@ class CameraRuntime : AutoCloseable {
         private set
     var cpuMillis = 0.0
         private set
+    var phaseHousingMillis = 0.0
+        private set
+    var phasePrepareMillis = 0.0
+        private set
+    var phaseWorldDrawMillis = 0.0
+        private set
+    var phaseCompositeMillis = 0.0
+        private set
+    var gpuTotalMillis = Double.NaN
+        private set
+    val gpuTimingsEnabled: Boolean get() = config.loadGpuTimings()
     var budgetFallbacks = 0
         private set
     var mirrorTargetCount = 0
@@ -80,6 +92,7 @@ class CameraRuntime : AutoCloseable {
     private var world: ClientLevel? = null
     private var renderer: CameraWorldRenderer? = null
     private val environments = CameraEnvironmentSampler()
+    private var gpuTimings: CameraGpuTimings? = null
     private var context: LevelRenderContext? = null
     private data class ViewKey(val id: String, val resolution: Resolution, val embedded: Boolean)
     private val prepared = mutableMapOf<ViewKey, PreparedCameraView>()
@@ -106,7 +119,18 @@ class CameraRuntime : AutoCloseable {
         syncWorld(client)
         net.astrorbits.differangle.client.world.WorldClient.tick(client, this)
         if (mirrors.isNotEmpty() && system.screens().none { it.mirror && it.enabled }) reloadResources()
-        world?.let { environments.tick(it, system.cameras()) }
+        world?.let { level ->
+            val cameras = system.cameras()
+            if (config.loadProbeLazy()) {
+                val now = System.nanoTime()
+                environments.tick(level, cameras.filter { camera ->
+                    val frame = system.frame(camera.id)
+                    frame == null || now - frame.renderedAtNanos >= camera.intervalNanos - 50_000_000L
+                })
+            } else {
+                environments.tick(level, cameras)
+            }
+        }
     }
 
     fun syncMedia(requested: Map<String, MediaRequest>) {
@@ -138,6 +162,9 @@ class CameraRuntime : AutoCloseable {
         environments.clear()
         statistics = FrameStatistics(0, 0, 0)
         sectionCount = 0; drawCalls = 0; cpuMillis = 0.0
+        phaseHousingMillis = 0.0; phasePrepareMillis = 0.0; phaseWorldDrawMillis = 0.0; phaseCompositeMillis = 0.0
+        gpuTotalMillis = Double.NaN
+        gpuTimings?.close(); gpuTimings = null
         budgetFallbacks = 0; mirrorTargetCount = 0; mirrorTargetPixels = 0L
         lastError = null
         lastFailure = null
@@ -175,6 +202,11 @@ class CameraRuntime : AutoCloseable {
     }
 
     private fun renderNow(renderContext: LevelRenderContext) {
+        gpuTotalMillis = gpuTimings?.collectIfReady() ?: Double.NaN
+        phaseHousingMillis = 0.0
+        phasePrepareMillis = 0.0
+        phaseWorldDrawMillis = 0.0
+        phaseCompositeMillis = 0.0
         val client = Minecraft.getInstance()
         syncWorld(client)
         if (world == null || (system.screens().isEmpty() && net.astrorbits.differangle.client.world.WorldClient.debugCameras.isEmpty()) || lastError != null) return
@@ -197,14 +229,22 @@ class CameraRuntime : AutoCloseable {
         dispatcher?.lock()
         var recoverableFailure: Exception? = null
         try {
+            if (config.loadGpuTimings()) {
+                (gpuTimings ?: CameraGpuTimings().also { gpuTimings = it }).begin()
+            }
             val gpu = renderer ?: CameraWorldRenderer(layers, cameraShaders).also { renderer = it }
             gpu.beginFrame()
             val target = renderContext.gameRenderer().mainRenderTarget()
-            net.astrorbits.differangle.client.world.WorldClient.blocks.forEach { block ->
-                net.astrorbits.differangle.client.world.WorldGeometry.housing(block,origin,camera.viewRotationMatrix,target,gpu.compositor)
+            val housingStart = System.nanoTime()
+            try {
+                net.astrorbits.differangle.client.world.WorldClient.blocks.forEach { block ->
+                    net.astrorbits.differangle.client.world.WorldGeometry.housing(block,origin,camera.viewRotationMatrix,target,gpu.compositor)
+                }
+                net.astrorbits.differangle.client.world.WorldGeometry.debug(origin,camera.viewRotationMatrix,target,gpu.compositor)
+                surfaces.forEach { gpu.compositor.solid(it.modelMatrix(origin),camera.viewRotationMatrix,target) }
+            } finally {
+                phaseHousingMillis = (System.nanoTime() - housingStart) / 1_000_000.0
             }
-            net.astrorbits.differangle.client.world.WorldGeometry.debug(origin,camera.viewRotationMatrix,target,gpu.compositor)
-            surfaces.forEach { gpu.compositor.solid(it.modelMatrix(origin),camera.viewRotationMatrix,target) }
             if (mode == CameraMode.TEXTURE) {
                 val regular = system.renderFrame(start, visible.filter { !it.mirror && !isMedia(it) }.map { it.id }, origin)
                 var mirrorUpdates = 0
@@ -332,6 +372,7 @@ class CameraRuntime : AutoCloseable {
                 recoverableFailure = failure
             }
         } finally {
+            gpuTimings?.end()
             try {
                 renderer?.endFrame()
             } catch (failure: Exception) {
@@ -352,20 +393,35 @@ class CameraRuntime : AutoCloseable {
         prepared.getOrPut(ViewKey(camera.id, camera.resolution, embedded)) {
             val client = Minecraft.getInstance()
             val loadedDistance = (client.options.effectiveRenderDistance * 16).toFloat()
-            renderer!!.prepare(camera, context!!.levelRenderer(), environments.sample(world!!, camera,
-                client.deltaTracker.getGameTimeDeltaPartialTick(false), loadedDistance), embedded)
+            val start = System.nanoTime()
+            try {
+                renderer!!.prepare(camera, context!!.levelRenderer(), environments.sample(world!!, camera,
+                    client.deltaTracker.getGameTimeDeltaPartialTick(false), loadedDistance), embedded)
+            } finally {
+                phasePrepareMillis = (System.nanoTime() - start) / 1_000_000.0
+            }
         }
 
     private fun drawTexture(camera: CameraDefinition, target: TextureTarget) {
         check(context != null) { "Camera renders must run in the world render event" }
         val view = prepare(camera)
-        renderer!!.draw(view, renderer!!.compositor.texture(target, view.environment.fogColor))
+        val start = System.nanoTime()
+        try {
+            renderer!!.draw(view, renderer!!.compositor.texture(target, view.environment.fogColor))
+        } finally {
+            phaseWorldDrawMillis = (System.nanoTime() - start) / 1_000_000.0
+        }
     }
 
     private fun drawSurface(screen: ScreenDefinition, target: TextureTarget, origin: Position) {
         val ctx = context ?: error("Screen draws must run in the world render event")
-        renderer!!.compositor.surface(screen, origin, ctx.levelState().cameraRenderState.viewRotationMatrix,
-            ctx.gameRenderer().mainRenderTarget(), target.colorTextureView!!)
+        val start = System.nanoTime()
+        try {
+            renderer!!.compositor.surface(screen, origin, ctx.levelState().cameraRenderState.viewRotationMatrix,
+                ctx.gameRenderer().mainRenderTarget(), target.colorTextureView!!)
+        } finally {
+            phaseCompositeMillis += (System.nanoTime() - start) / 1_000_000.0
+        }
     }
 
     private fun fail(detail: Component?) {

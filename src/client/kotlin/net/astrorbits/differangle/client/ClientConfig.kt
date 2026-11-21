@@ -42,6 +42,30 @@ internal class ClientConfig {
         save(data.deepCopy().apply { addProperty("cameraShaders", enabled) })
     }
 
+    fun loadGpuTimings(): Boolean = data.get("cameraGpuTimings")?.let {
+        if (it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) it.asBoolean else false
+    } ?: false
+
+    fun loadProbeLazy(): Boolean = data.get("cameraProbeLazy")?.let {
+        if (it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) it.asBoolean else true
+    } ?: true
+
+    fun loadVisibilityCache(): Boolean = data.get("cameraVisibilityCache")?.let {
+        if (it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) it.asBoolean else true
+    } ?: true
+
+    fun loadBatchClearMerge(): Boolean = data.get("cameraBatchClearMerge")?.let {
+        if (it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) it.asBoolean else true
+    } ?: true
+
+    fun loadShadowUpdateRate(): Int = data.get("cameraShadowUpdateRate")?.let {
+        if (it.isJsonPrimitive && it.asJsonPrimitive.isNumber) it.asInt.coerceIn(1, 8) else 1
+    } ?: 1
+
+    fun loadShadowAdaptive(): Boolean = data.get("cameraShadowAdaptive")?.let {
+        if (it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) it.asBoolean else true
+    } ?: true
+
     private fun save(updated: JsonObject) {
         Files.createDirectories(path.parent)
         val temporary = Files.createTempFile(path.parent, "differangle-", ".tmp")
