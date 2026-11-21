@@ -66,6 +66,10 @@ internal class ClientConfig {
         if (it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) it.asBoolean else true
     } ?: true
 
+    fun loadMirrorShaderPacks(): String = data.get("mirrorShaderPacks")?.let {
+        if (it.isJsonPrimitive && it.asJsonPrimitive.isString) it.asString else "BSL,Complementary"
+    } ?: "BSL,Complementary"
+
     private fun save(updated: JsonObject) {
         Files.createDirectories(path.parent)
         val temporary = Files.createTempFile(path.parent, "differangle-", ".tmp")

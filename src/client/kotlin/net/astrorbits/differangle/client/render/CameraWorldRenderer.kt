@@ -43,7 +43,17 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
     private val environments = DynamicUniformStorage<EnvironmentUniform>("Differangle environments", 128, 16)
     val compositor = CameraCompositor()
     private var shaderCameras: net.astrorbits.differangle.client.render.compat.IrisShaderCameras? = null
+    private val config = net.astrorbits.differangle.client.ClientConfig()
     val terrainDraws get() = terrain.terrainDraws + (shaderCameras?.terrainDraws ?: 0)
+
+    /** Mirrors keep the Iris backend only for packs whose screen-space passes tolerate the
+     *  off-axis mirror frustum. The allowlist is config/mirrorShaderPacks, comma-separated prefixes. */
+    private fun mirrorPackAllowed(): Boolean {
+        val pack = net.irisshaders.iris.Iris.getCurrentPackName().lowercase()
+        return config.loadMirrorShaderPacks().split(',')
+            .map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+            .any { pack.startsWith(it) }
+    }
 
     fun beginFrame() { terrain.beginFrame(); nativeFeatures.beginFrame(); shaderCameras?.beginFrame() }
 
@@ -52,7 +62,8 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
         val atlas = Minecraft.getInstance().atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS)
         val sun = atlas.getSprite(Identifier.withDefaultNamespace("sun"))
         val moon = atlas.getSprite(Identifier.withDefaultNamespace("moon/${environment.moonPhase.serializedName}"))
-        val preparedTerrain = if (cameraShaders && !embedded && !camera.mirrored && RendererCompatibility.shadersEnabled()) {
+        val mirrorShaders = !camera.mirrored || mirrorPackAllowed()
+        val preparedTerrain = if (cameraShaders && !embedded && mirrorShaders && RendererCompatibility.shadersEnabled()) {
             shaderBackend().prepare(camera)
         } else terrain.prepare(camera, renderer, CameraLayer.TRANSLUCENT in layers)
         return PreparedCameraView(camera, preparedTerrain, environment,
@@ -68,7 +79,7 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
             client.atlasManager.getAtlasOrThrow(AtlasIds.BLOCKS).textureView,
             client.gameRenderer.levelLightmap(), client.atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS).textureView,
             client.textureManager.getTexture(Identifier.withDefaultNamespace("textures/environment/end_sky.png")).textureView)
-        if (cameraShaders && !output.embedded && !view.camera.mirrored && RendererCompatibility.shadersEnabled()) {
+        if (cameraShaders && !output.embedded && (!view.camera.mirrored || mirrorPackAllowed()) && RendererCompatibility.shadersEnabled()) {
             shaderBackend().draw(context, nativeFeatures, layers)
             return
         }
