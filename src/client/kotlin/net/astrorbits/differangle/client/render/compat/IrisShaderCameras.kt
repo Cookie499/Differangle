@@ -19,6 +19,7 @@ import net.caffeinemc.mods.sodium.client.render.chunk.terrain.DefaultTerrainRend
 import net.caffeinemc.mods.sodium.client.render.viewport.CameraTransform
 import net.caffeinemc.mods.sodium.client.util.FogParameters
 import net.irisshaders.iris.Iris
+import net.irisshaders.iris.gui.option.IrisVideoSettings
 import net.irisshaders.iris.mixin.LevelRendererAccessor
 import net.irisshaders.iris.pipeline.IrisRenderingPipeline
 import net.irisshaders.iris.pipeline.PipelineManager
@@ -134,8 +135,16 @@ class IrisShaderCameras : AutoCloseable {
                                 context.view.camera.fov, context.view.camera.nearPlane, context.view.camera.farPlane,
                                 context.view.camera.offAxis)) {
                             Profiler.get().push("differangle_camera_shadows")
+                            // Mirror cameras need the shadow map to cover their full far plane;
+                            // the user shadow distance cuts it short and leaves a hard boundary.
+                            val mirrored = context.view.camera.mirrored
+                            val shadowDistanceBackup = IrisVideoSettings.shadowDistance
+                            if (mirrored) IrisVideoSettings.shadowDistance = client.options.effectiveRenderDistance
                             try { entry.pipeline.renderShadows(client.levelRenderer as LevelRendererAccessor, camera, state) }
-                            finally { Profiler.get().pop() }
+                            finally {
+                                if (mirrored) IrisVideoSettings.shadowDistance = shadowDistanceBackup
+                                Profiler.get().pop()
+                            }
                             // Shadow rendering restores the player's projection; restore this camera's projection too.
                             captured.setGbufferModelView(state.viewRotationMatrix)
                             captured.setGbufferProjection(state.projectionMatrix)
