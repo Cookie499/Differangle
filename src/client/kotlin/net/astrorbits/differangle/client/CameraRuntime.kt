@@ -269,37 +269,46 @@ class CameraRuntime : AutoCloseable {
                     compareBy<ScreenDefinition> { mirrors[it.id]?.renderedAtNanos ?: Long.MIN_VALUE }
                         .thenByDescending { apparentArea(it, origin) },
                 )
-                for ((index, screen) in updateOrder.withIndex()) {
+                // Spread the startup cost of newly visible mirrors: at most one target
+                // allocation per frame, and a mirror renders no earlier than the frame
+                // after its target exists. Turning toward many mirrors no longer stalls
+                // one frame with several allocations and full world renders.
+                var allocations = 0
+                for (screen in updateOrder) {
+                    if (mirrors.containsKey(screen.id) || allocations >= MAX_MIRROR_ALLOCATIONS_PER_FRAME) continue
                     val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
-                    var frame = mirrors[screen.id]
+                    if (!canAllocateMirror(definition.resolution)) break
                     try {
-                        if (frame == null && index < MAX_MIRROR_UPDATES_PER_FRAME && canAllocateMirror(definition.resolution)) {
-                            frame = MirrorFrame(TextureTarget("Differangle mirror ${screen.id}", definition.resolution.width,
-                                definition.resolution.height, true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM), definition,
-                                start, Long.MIN_VALUE)
-                            mirrors[screen.id] = frame
-                        }
+                        mirrors[screen.id] = MirrorFrame(TextureTarget("Differangle mirror ${screen.id}", definition.resolution.width,
+                            definition.resolution.height, true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM), definition,
+                            start, Long.MIN_VALUE)
+                        allocations++
                     } catch (failure: Exception) {
                         logger.error("Mirror {} target allocation failed; this mirror remains uncached", screen.id, failure)
-                        continue
                     }
-                    if (frame == null) continue
+                }
+                var rendered = 0
+                for (screen in updateOrder) {
+                    if (rendered >= MAX_MIRROR_UPDATES_PER_FRAME) break
+                    val frame = mirrors[screen.id] ?: continue
+                    val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
+                    try {
+                        // The freshest mirrors follow the interpolated main eye. Lower-priority mirrors
+                        // retain their last complete frame instead of exhausting the GPU mid-frame.
+                        frame.definition = definition
+                        drawTexture(definition, frame.target)
+                        frame.renderedAtNanos = start
+                        mirrorUpdates++
+                        rendered++
+                    } catch (failure: Exception) {
+                        mirrors.remove(screen.id)
+                        runCatching { frame.target.destroyBuffers() }
+                        logger.error("Mirror {} rendering failed; only this mirror was disabled for the frame", screen.id, failure)
+                    }
+                }
+                for (screen in admittedMirrors) {
+                    val frame = mirrors[screen.id] ?: continue
                     frame.lastUsedNanos = start
-                    if (index < MAX_MIRROR_UPDATES_PER_FRAME) {
-                        try {
-                            // The freshest mirrors follow the interpolated main eye. Lower-priority mirrors
-                            // retain their last complete frame instead of exhausting the GPU mid-frame.
-                            frame.definition = definition
-                            drawTexture(definition, frame.target)
-                            frame.renderedAtNanos = start
-                            mirrorUpdates++
-                        } catch (failure: Exception) {
-                            mirrors.remove(screen.id)
-                            runCatching { frame.target.destroyBuffers() }
-                            logger.error("Mirror {} rendering failed; only this mirror was disabled for the frame", screen.id, failure)
-                            continue
-                        }
-                    }
                     try {
                         drawSurface(screen, frame.target, origin)
                         mirrorDraws++
@@ -515,7 +524,8 @@ class CameraRuntime : AutoCloseable {
     private fun pixels(resolution: Resolution): Long = resolution.width.toLong() * resolution.height
 
     private companion object {
-        const val MAX_MIRROR_UPDATES_PER_FRAME = 2
+        const val MAX_MIRROR_UPDATES_PER_FRAME = 1
+        const val MAX_MIRROR_ALLOCATIONS_PER_FRAME = 1
         const val MAX_EMBEDDED_DRAWS_PER_FRAME = 2
         const val MAX_MIRROR_TARGETS = 8
         const val MAX_MIRROR_TARGET_PIXELS = 8L * 1024L * 1024L
