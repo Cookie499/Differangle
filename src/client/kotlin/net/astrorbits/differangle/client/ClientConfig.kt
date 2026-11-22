@@ -70,6 +70,14 @@ internal class ClientConfig {
         if (it.isJsonPrimitive && it.asJsonPrimitive.isString) it.asString else "BSL,Complementary"
     } ?: "BSL,Complementary"
 
+    fun loadMirrorResolutionScale(): Double = data.get("mirrorResolutionScale")?.let {
+        if (it.isJsonPrimitive && it.asJsonPrimitive.isNumber) it.asDouble.coerceIn(0.25, 1.0) else 1.0
+    } ?: 1.0
+
+    fun saveMirrorResolutionScale(scale: Double) {
+        save(data.deepCopy().apply { addProperty("mirrorResolutionScale", scale) })
+    }
+
     private fun save(updated: JsonObject) {
         Files.createDirectories(path.parent)
         val temporary = Files.createTempFile(path.parent, "differangle-", ".tmp")

@@ -42,6 +42,14 @@ class CameraRuntime : AutoCloseable {
         private set
     var cameraShaders = config.loadCameraShaders()
         private set
+    var mirrorResolutionScale = config.loadMirrorResolutionScale()
+        private set
+
+    fun setMirrorResolutionScale(value: Double) {
+        RenderSystem.assertOnRenderThread()
+        config.saveMirrorResolutionScale(value)
+        mirrorResolutionScale = value.coerceIn(0.25, 1.0)
+    }
 
     fun setCameraShaderRendering(enabled: Boolean) {
         RenderSystem.assertOnRenderThread()
@@ -252,7 +260,7 @@ class CameraRuntime : AutoCloseable {
                 val requested = system.screens().filter { it.mirror && it.enabled }.associateBy { it.id }
                 mirrors.entries.removeIf { (id, frame) ->
                     val screen = requested[id]
-                    if (screen == null || screen.resolution != frame.definition.resolution) {
+                    if (screen == null || mirrorResolution(screen) != frame.definition.resolution) {
                         frame.target.destroyBuffers(); true
                     } else false
                 }
@@ -276,7 +284,8 @@ class CameraRuntime : AutoCloseable {
                 var allocations = 0
                 for (screen in updateOrder) {
                     if (mirrors.containsKey(screen.id) || allocations >= MAX_MIRROR_ALLOCATIONS_PER_FRAME) continue
-                    val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
+                    val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f))
+                        ?.copy(resolution = mirrorResolution(screen)) ?: continue
                     if (!canAllocateMirror(definition.resolution)) break
                     try {
                         mirrors[screen.id] = MirrorFrame(TextureTarget("Differangle mirror ${screen.id}", definition.resolution.width,
@@ -292,7 +301,8 @@ class CameraRuntime : AutoCloseable {
                     if (rendered >= MAX_MIRROR_UPDATES_PER_FRAME) break
                     val frame = mirrors[screen.id] ?: continue
                     if (start - frame.renderedAtNanos < 1_000_000_000L / screen.updateRate) continue
-                    val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
+                    val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f))
+                        ?.copy(resolution = mirrorResolution(screen)) ?: continue
                     try {
                         // The freshest mirrors follow the interpolated main eye. Lower-priority mirrors
                         // retain their last complete frame instead of exhausting the GPU mid-frame.
@@ -509,7 +519,7 @@ class CameraRuntime : AutoCloseable {
     private fun makeMirrorRoom(admitted: List<ScreenDefinition>) {
         val protected = admitted.mapTo(mutableSetOf()) { it.id }
         val missing = admitted.filter { it.id !in mirrors }
-        val missingPixels = missing.sumOf { pixels(it.resolution) }
+        val missingPixels = missing.sumOf { pixels(mirrorResolution(it)) }
         val removable = mirrors.entries.filter { it.key !in protected }.sortedBy { it.value.lastUsedNanos }.iterator()
         while ((mirrors.size + missing.size > MAX_MIRROR_TARGETS ||
                 mirrorPixels() + missingPixels > MAX_MIRROR_TARGET_PIXELS) && removable.hasNext()) {
@@ -520,6 +530,14 @@ class CameraRuntime : AutoCloseable {
 
     private fun canAllocateMirror(resolution: Resolution): Boolean =
         mirrors.size < MAX_MIRROR_TARGETS && mirrorPixels() + pixels(resolution) <= MAX_MIRROR_TARGET_PIXELS
+
+    private fun mirrorResolution(screen: ScreenDefinition): Resolution {
+        val scale = mirrorResolutionScale
+        return Resolution(
+            (screen.resolution.width * scale).toInt().coerceAtLeast(16),
+            (screen.resolution.height * scale).toInt().coerceAtLeast(16),
+        )
+    }
 
     private fun mirrorPixels(): Long = mirrors.values.sumOf { pixels(it.definition.resolution) }
     private fun pixels(resolution: Resolution): Long = resolution.width.toLong() * resolution.height

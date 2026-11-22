@@ -110,6 +110,10 @@ object CameraCommands {
                     runtime.phaseHousingMillis, runtime.phasePrepareMillis, runtime.phaseWorldDrawMillis,
                     runtime.phaseCompositeMillis, runtime.cpuMillis, gpu))
             } })
+            root.then(literal("mirrorScale").then(argument("scale", DoubleArgumentType.doubleArg(0.25, 1.0)).executes { ctx -> run(ctx, runtime) {
+                runtime.setMirrorResolutionScale(DoubleArgumentType.getDouble(ctx, "scale"))
+                Component.literal("mirrorScale=" + runtime.mirrorResolutionScale)
+            } }))
             // Local (client-side) Camera/Screen definitions, not the world entities.
             root.then(literal("list").executes { ctx -> run(ctx, runtime) {
                 Component.literal(
