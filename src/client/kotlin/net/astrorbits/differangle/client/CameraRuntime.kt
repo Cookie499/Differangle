@@ -291,6 +291,7 @@ class CameraRuntime : AutoCloseable {
                 for (screen in updateOrder) {
                     if (rendered >= MAX_MIRROR_UPDATES_PER_FRAME) break
                     val frame = mirrors[screen.id] ?: continue
+                    if (start - frame.renderedAtNanos < 1_000_000_000L / screen.updateRate) continue
                     val definition = MirrorView.camera(screen, mirrorEye, (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)) ?: continue
                     try {
                         // The freshest mirrors follow the interpolated main eye. Lower-priority mirrors
