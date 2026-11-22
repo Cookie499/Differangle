@@ -55,6 +55,9 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
             .any { pack.startsWith(it) }
     }
 
+    private fun usesCameraShaders(camera: CameraDefinition, embedded: Boolean): Boolean =
+        cameraShaders && !embedded && RendererCompatibility.shadersEnabled() && (!camera.mirrored || mirrorPackAllowed())
+
     fun beginFrame() { terrain.beginFrame(); nativeFeatures.beginFrame(); shaderCameras?.beginFrame() }
 
     fun prepare(camera: CameraDefinition, renderer: LevelRenderer, environment: CameraEnvironment,
@@ -62,8 +65,7 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
         val atlas = Minecraft.getInstance().atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS)
         val sun = atlas.getSprite(Identifier.withDefaultNamespace("sun"))
         val moon = atlas.getSprite(Identifier.withDefaultNamespace("moon/${environment.moonPhase.serializedName}"))
-        val mirrorShaders = !camera.mirrored || mirrorPackAllowed()
-        val preparedTerrain = if (cameraShaders && !embedded && mirrorShaders && RendererCompatibility.shadersEnabled()) {
+        val preparedTerrain = if (usesCameraShaders(camera, embedded)) {
             shaderBackend().prepare(camera)
         } else terrain.prepare(camera, renderer, CameraLayer.TRANSLUCENT in layers)
         return PreparedCameraView(camera, preparedTerrain, environment,
@@ -79,7 +81,7 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
             client.atlasManager.getAtlasOrThrow(AtlasIds.BLOCKS).textureView,
             client.gameRenderer.levelLightmap(), client.atlasManager.getAtlasOrThrow(AtlasIds.CELESTIALS).textureView,
             client.textureManager.getTexture(Identifier.withDefaultNamespace("textures/environment/end_sky.png")).textureView)
-        if (cameraShaders && !output.embedded && (!view.camera.mirrored || mirrorPackAllowed()) && RendererCompatibility.shadersEnabled()) {
+        if (usesCameraShaders(view.camera, output.embedded)) {
             shaderBackend().draw(context, nativeFeatures, layers)
             return
         }

@@ -62,8 +62,13 @@ class CameraMirrorGameTest : FabricClientGameTest {
                 val entity = CameraController.screen(server.overworld(), BlockPos(-4,-59,5))
                 check(entity.config.mirror && entity.config.cameraUuid == null)
             }
+            world.server.runCommand("tp @a -1.5 -60 -3.5 0 0")
+            context.waitFor({
+                val runtime = DifferangleClient.runtime
+                runtime.statistics.cameraUpdates == 2 && runtime.statistics.screenDraws == 2
+            }, 200)
             context.runOnClient<RuntimeException> { DifferangleClient.runtime.clear() }
-            println("MIRROR PASS: unbound screen, observer motion, rotated plane, Texture-only, cloned NBT")
+            println("MIRROR PASS: unbound screen, observer motion, rotated plane, Texture-only, cloned NBT, simultaneous refresh")
         }
     }
     private fun await(context: ClientGameTestContext) {

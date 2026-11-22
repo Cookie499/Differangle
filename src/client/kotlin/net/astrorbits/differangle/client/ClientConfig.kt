@@ -66,9 +66,9 @@ internal class ClientConfig {
         if (it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) it.asBoolean else true
     } ?: true
 
-    fun loadMirrorShaderPacks(): String = data.get("mirrorShaderPacks")?.let {
-        if (it.isJsonPrimitive && it.asJsonPrimitive.isString) it.asString else "BSL,Complementary"
-    } ?: "BSL,Complementary"
+    fun loadMirrorShaderPacks(): String = data.get("mirrorShaderPacks")
+        ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+        ?: "BSL,Complementary,Differangle-Mirror-Photon-v1.3b.zip,Differangle-Mirror-Bliss-v2.1.2.zip"
 
     fun loadMirrorResolutionScale(): Double = data.get("mirrorResolutionScale")?.let {
         if (it.isJsonPrimitive && it.asJsonPrimitive.isNumber) it.asDouble.coerceIn(0.25, 1.0) else 1.0
