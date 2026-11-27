@@ -14,6 +14,7 @@ import net.astrorbits.differangle.camera.Position
 import net.astrorbits.differangle.camera.Rotation
 import net.astrorbits.differangle.media.AudioAttenuation
 import net.astrorbits.differangle.media.MediaConfig
+import net.astrorbits.differangle.media.MediaFit
 import net.astrorbits.differangle.media.MediaSourceType
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.minecraft.ChatFormatting
@@ -246,6 +247,8 @@ object WorldCommands {
         .then(screenOp("source"))
         .then(screenOp("audio"))
         .then(screenOp("playback"))
+        .then(screenOp("playback-toggle"))
+        .then(screenOp("media-control"))
         // Submitted by the screen GUI; the payload carries the revision guard, so it has no tab completion.
         .then(screenOp("edit"))
 
@@ -439,31 +442,96 @@ object WorldCommands {
                     CameraController.configure(source.level, pos, updated)
                     feedback(context, Component.translatable("differangle.screen.updated", entity.screenUuid.toString()))
                 }
+                "media-control" -> {
+                    require(raw.size in 6..8) { "Expected screen coordinates, UUID, and media action." }
+                    val pos = BlockPos(raw[1].toInt(), raw[2].toInt(), raw[3].toInt())
+                    val screen = CameraController.screen(source.level, pos)
+                    if (raw[4] != screen.screenUuid.toString()) {
+                        source.sendFailure(Component.translatable("differangle.error.screen.missing"))
+                        return 0
+                    }
+                    val config = screen.config
+                    val media = config.media
+                    if (config.mirror || !media.sourceType.isVideo) return 0
+                    val now = source.level.gameTime
+                    val next = when (raw[5]) {
+                        "toggle" -> media.togglePlayback(now)
+                        "restart" -> media.copy(playing = true).anchored(now, 0.0)
+                        "loop" -> media.copy(loop = !media.loop)
+                            .anchored(now, media.playbackPositionAt(now))
+                        "seek" -> {
+                            require(raw.size == 7) { "Expected a playback position in seconds." }
+                            val position = number(raw, 6)
+                            val maximum = if (media.durationMillis > 0L) media.durationMillis / 1000.0 else Double.MAX_VALUE
+                            media.anchored(now, position.coerceIn(0.0, maximum))
+                        }
+                        "duration" -> {
+                            require(raw.size == 8) { "Expected a screen revision and duration in milliseconds." }
+                            if (screen.revision != raw[6].toLong() || media.durationMillis != 0L) return 0
+                            val duration = raw[7].toLong()
+                            require(duration > 0L) { "Expected a positive media duration." }
+                            media.copy(durationMillis = duration)
+                        }
+                        else -> error("Unknown media action.")
+                    }
+                    screen.configure(config.copy(media = next.finishIfDue(now)))
+                    1
+                }
+                "playback-toggle" -> {
+                    require(raw.size == 5) { "Expected screen coordinates and UUID." }
+                    val player = source.playerOrException
+                    if (player.mainHandItem.item !== WorldResources.screenRemote) {
+                        source.sendFailure(Component.translatable("differangle.screen.remote.hold"))
+                        return 0
+                    }
+                    val pos = BlockPos(raw[1].toInt(), raw[2].toInt(), raw[3].toInt())
+                    val screen = CameraController.screen(source.level, pos)
+                    if (raw[4] != screen.screenUuid.toString()) {
+                        source.sendFailure(Component.translatable("differangle.error.screen.missing"))
+                        return 0
+                    }
+                    val config = screen.config
+                    val media = config.media
+                    if (config.mirror || !media.sourceType.isVideo) {
+                        player.sendOverlayMessage(Component.translatable("differangle.screen.remote.no_video"))
+                        return 0
+                    }
+                    val now = source.level.gameTime
+                    val next = media.togglePlayback(now)
+                    screen.configure(config.copy(media = next))
+                    player.sendOverlayMessage(Component.translatable(
+                        if (next.playing) "differangle.screen.remote.resumed" else "differangle.screen.remote.paused",
+                    ))
+                    1
+                }
                 "edit" -> {
                     require(raw.size >= 6) { "screen edit" }
                     val pos = BlockPos(raw[1].toInt(), raw[2].toInt(), raw[3].toInt())
                     val entity = CameraController.screen(source.level, pos)
                     require(raw[4] == entity.screenUuid.toString() && raw[5].toLong() == entity.revision) { "screen revision" }
                     val p = raw.take(4) + raw.drop(6)
-                    require(p.size in setOf(18, 19, 29)) { "screen edit" }
-                    val requestedMedia = if (p.size == 29) MediaConfig(
+                    require(p.size in setOf(18, 19, 29, 30)) { "screen edit" }
+                    val oldMedia = entity.config.media
+                    val requestedMedia = if (p.size >= 29) MediaConfig(
                         MediaSourceType.parse(p[19]), if (p[20] == "none") "" else p[20],
                         flag(p[21]), flag(p[22]), number(p, 23), flag(p[24]), angle(p, 25),
                         AudioAttenuation.parse(p[26]), angle(p, 27), p[28].toInt(),
-                    ) else entity.config.media
-                    val oldMedia = entity.config.media
+                        fit = p.getOrNull(29)?.let(MediaFit::parse) ?: oldMedia.fit,
+                    ) else oldMedia
                     val sourceChanged = requestedMedia.sourceType != oldMedia.sourceType ||
                         requestedMedia.sourceUrl != oldMedia.sourceUrl
                     val timelineChanged = sourceChanged || requestedMedia.playing != oldMedia.playing ||
                         requestedMedia.loop != oldMedia.loop || requestedMedia.positionSeconds != oldMedia.positionSeconds
-                    val media = if (!timelineChanged) requestedMedia.copy(positionGameTime = oldMedia.positionGameTime)
+                    val media = if (!timelineChanged) requestedMedia.copy(
+                        positionGameTime = oldMedia.positionGameTime, durationMillis = oldMedia.durationMillis,
+                    )
                     else if (sourceChanged) requestedMedia.anchored(source.level.gameTime, 0.0)
                     else {
                         // When the editor changed play/loop but left the position field untouched, continue
                         // from the position the authoritative clock has reached instead of jumping backwards.
                         val position = if (requestedMedia.positionSeconds == oldMedia.positionSeconds)
                             oldMedia.positionAt(source.level.gameTime) else requestedMedia.positionSeconds
-                        requestedMedia.anchored(source.level.gameTime, position)
+                        requestedMedia.copy(durationMillis = oldMedia.durationMillis).anchored(source.level.gameTime, position)
                     }
                     val updated = ScreenConfig(
                         if (p[4] == "none") null else ScreenConfig.uuid(p[4]) ?: error("bad camera UUID"),

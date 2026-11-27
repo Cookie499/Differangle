@@ -2,6 +2,7 @@ package net.astrorbits.differangle.world
 
 import net.astrorbits.differangle.media.AudioAttenuation
 import net.astrorbits.differangle.media.MediaConfig
+import net.astrorbits.differangle.media.MediaFit
 import net.astrorbits.differangle.media.MediaSourceType
 import net.minecraft.world.level.storage.ValueInput
 import net.minecraft.world.level.storage.ValueOutput
@@ -21,7 +22,8 @@ data class ScreenConfig(
 ) {
     init {
         require(width.isFinite() && width in 0.125f..64f && height.isFinite() && height in 0.125f..64f)
-        require(resX in 16..2048 && resY in 16..2048 && fps in 1..240)
+        require(resX in 16..MAX_RESOLUTION && resY in 16..MAX_RESOLUTION && fps in 1..240)
+        require(resX.toLong() * resY <= MAX_PIXELS) { "Screen resolution exceeds the pixel limit." }
         require(listOf(offsetX, offsetY, offsetZ).all { it.isFinite() && it in -64.0..64.0 })
         require(listOf(yaw, pitch, roll).all { it.isFinite() })
         require(frameDepth.isFinite() && frameDepth in 0.01f..1f)
@@ -47,9 +49,14 @@ data class ScreenConfig(
         out.putFloat("audio_distance", media.audibleDistance)
         out.putInt("media_max_height", media.maxVideoHeight)
         out.putLong("media_position_game_time", media.positionGameTime)
+        out.putLong("media_duration_ms", media.durationMillis)
+        out.putString("media_fit", media.fit.serializedName)
     }
 
     companion object {
+        const val MAX_RESOLUTION = 8192
+        const val MAX_PIXELS = 32L * 1024 * 1024
+
         fun uuid(value: String): UUID? = runCatching { UUID.fromString(value) }.getOrNull()
         fun load(input: ValueInput): ScreenConfig {
             val binding = uuid(input.getStringOr("camera_uuid", ""))
@@ -60,8 +67,10 @@ data class ScreenConfig(
                 input.getDoubleOr("media_position", 0.0), input.getBooleanOr("audio_enabled", true),
                 input.getFloatOr("audio_volume", 1f),
                 AudioAttenuation.parse(input.getStringOr("audio_attenuation", "linear")),
-                input.getFloatOr("audio_distance", 32f), input.getIntOr("media_max_height", 720),
+                input.getFloatOr("audio_distance", 32f), input.getIntOr("media_max_height", MediaConfig.MAX_SOURCE_HEIGHT),
                 input.getLongOr("media_position_game_time", -1L),
+                input.getLongOr("media_duration_ms", 0L),
+                MediaFit.entries.firstOrNull { it.serializedName == input.getStringOr("media_fit", "") } ?: MediaFit.STRETCH,
             ) }.getOrDefault(MediaConfig())
             return runCatching { ScreenConfig(binding,
                 input.getFloatOr("width", 2f), input.getFloatOr("height", 1.125f),

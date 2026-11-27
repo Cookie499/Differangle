@@ -2,7 +2,7 @@
 
 开发优先级：Texture 为主要支持路径；Embedded 为低优先级实验模式，保留现有功能及必要修复，新功能优先在 Texture 实现。镜子仅支持 Texture。
 
-适配 Minecraft 26.2，验证版本为 Sodium 0.9.1、Iris 1.11.2。本模组不强制安装它们，生产 jar 不包含它们；Iris 自身依赖 Sodium。验证分为原版、仅 Sodium、Sodium + Iris 三组，最后一组覆盖光影开关。未安装时继续使用原版区块网格。
+适配 Minecraft 26.2，开发依赖为 Sodium 0.9.2 和 Iris 1.11.4。Iris 依赖 Sodium，两个模组均为可选依赖。未安装 Sodium 时使用原版区块网格。
 
 ## 渲染路径
 
@@ -11,7 +11,7 @@
 - Embedded：先用真实屏幕四边形与主场景深度生成 R8 可见区域，再让地形和实体采样该区域，深度测试只使用独立的摄像机深度。不再以摄像机三角形插值得到的屏幕深度反复比较同一屏幕平面，避免近距离、侧视时的自遮挡精度冲突。地形背面剔除与 Texture 一致。可见区域与摄像机深度按窗口尺寸重建、逐屏复用；不缓存屏幕颜色。
 - Sodium 紧凑顶点格式：解码位置、纹理坐标、顶点颜色、光照和材质透明阈值。Iris 开启光影时读取实际扩展顶点格式，并处理其不同的材质/AO 字节含义。
 - Iris：在主世界的光影合成结束、手部渲染清除世界深度之前绘制显示屏。Texture 的实验性光影后端为每台摄像机建立独立 Iris 管线，执行阴影、天空、Sodium 地形、实体与半透明内容、deferred/composite/final；渲染目标和历史帧独立。Embedded 仍使用基础渲染。
-- Iris 1.11.2 开启光影后会将原版反向 Z 的深度比较、清屏值转换为正向 Z。因此摄像机投影、天空远平面和 Embedded 主场景遮挡判断同步采用正向深度。不能只关闭 Iris 的程序替换，否则玻璃、水及实体仍会被错误的深度测试挡住。
+- Iris 1.11.4 在光影着色器中转换深度，摄像机投影和天空远平面使用原版反向 Z。早期 Iris 开启光影时，这两处使用正向 Z。
 - 基础后端暂时关闭 Iris 的即时顶点格式扩展；光影后端在自己的管线内启用，完成后恢复主视角管线、矩阵、摄像机、阴影状态和扩展标志。资源重载和世界切换释放本模组资源；借用的 Sodium 缓冲区不由本模组销毁。
 
 ## Texture 光影试验版
@@ -32,13 +32,13 @@
 
 `SodiumTerrain` 的候选集是摄像机自己的区块半径，再用摄像机自己的 Frustum 剔除；不能改用 Sodium 每帧的 render list，那批列表是主视角做完遮挡剔除后的结果，主视角看不到的地形（背后、地下、被挡住）会从显示屏上整片消失。顶点格式取 `ChunkMeshFormats.getCurrent()`（Iris 开启光影时由 Iris 覆写），而不是渲染器自身的字段；精灵动画通过 `api.texture.SpriteUtil.INSTANCE.markSpriteActive` 上报，内部实现类已标记 `forRemoval`。
 
-基础后端的非公开读取为两处：`SodiumWorldRenderer.renderSectionManager` 与其 `renderSections`，Sodium 0.9.1 都没有提供 getter（`run/mods` 中的构建连 `SodiumWorldRenderer.getRenderLists()` 也没有，上游 tag 才有）。二者集中在 `SodiumTerrain.sectionManager` / `sectionStorage`，缺失时记录一次警告并退化为不绘制 Sodium 地形，不影响主视角。运行时限制为 Sodium 0.9.x / Iris 1.11.x，其他系列需要重新检查格式及调用时序。
+基础后端通过 `SodiumTerrain.sectionManager` 和 `sectionStorage` 读取 Sodium 的区块管理器及区块存储。字段缺失时记录警告并跳过摄像机的 Sodium 地形绘制。
 
 ## 构建与回归
 
 客户端渲染模式保存在 `config/differangle.json` 的 `renderMode` 字段（`texture` / `embedded`）。`/differangle mode` 切换时立即写入，重启后恢复；配置缺失或模式无效时使用 `texture`。该选项跨世界生效，不写入屏幕 NBT。
 
-编译优先使用 `run/mods` 下上述精确版本的 jar。缺少本地 jar 时，从 Modrinth Maven 获取固定版本；依赖仅加入 `clientCompileOnly`。版本来源：[Sodium 0.9.1](https://modrinth.com/mod/sodium/version/mc26.2-0.9.1-fabric)、[Iris 1.11.2](https://modrinth.com/mod/iris/version/1.11.2%2B26.2-fabric)。
+编译优先使用 `run/mods` 下对应版本的 JAR，缺少本地文件时从 Modrinth Maven 下载。两个依赖仅加入 `clientCompileOnly`。[Sodium 0.9.2](https://modrinth.com/mod/sodium/version/mc26.2-0.9.2-fabric)、[Iris 1.11.4](https://modrinth.com/mod/iris/version/1.11.4%2B26.2-fabric)。
 
 `gradlew -PcameraGameTest build runCameraTest` 在 `build/camera-gametest` 内创建独立世界。测试所需模组放在该目录的 `mods` 中，光影包及配置也放在该目录；不使用 `run/saves`。
 

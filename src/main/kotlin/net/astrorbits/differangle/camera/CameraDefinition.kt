@@ -31,6 +31,13 @@ data class Rotation(val x: Float = 0f, val y: Float = 0f, val z: Float = 0f, val
 data class Resolution(val width: Int = 256, val height: Int = 144) {
     init { require(width > 0 && height > 0) { "Resolution must be positive" } }
     val aspect: Float get() = width.toFloat() / height
+    val pixels: Long get() = width.toLong() * height
+
+    fun limitedTo(maxDimension: Int, maxPixels: Long = Long.MAX_VALUE): Resolution {
+        if (width <= maxDimension && height <= maxDimension && pixels <= maxPixels) return this
+        val scale = minOf(maxDimension.toDouble() / maxOf(width, height), kotlin.math.sqrt(maxPixels.toDouble() / pixels))
+        return Resolution((width * scale).toInt().coerceAtLeast(1), (height * scale).toInt().coerceAtLeast(1))
+    }
 }
 
 data class CameraDefinition(

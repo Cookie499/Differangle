@@ -21,12 +21,13 @@ object WorldResources {
     val speakerType: BlockEntityType<SpeakerBlockEntity> = Registry.register(BuiltInRegistries.BLOCK_ENTITY_TYPE, id("speaker"), BlockEntityType(::SpeakerBlockEntity, setOf(speakerBlock)))
     val speakerItem: Item = Registry.register(BuiltInRegistries.ITEM, id("speaker"), BlockItem(speakerBlock, Item.Properties().setId(ResourceKey.create(Registries.ITEM, id("speaker")))))
     val bindingTool: Item = Registry.register(BuiltInRegistries.ITEM, id("binding_tool"), Item(Item.Properties().setId(ResourceKey.create(Registries.ITEM, id("binding_tool"))).stacksTo(1)))
+    private val remoteKey = ResourceKey.create(Registries.ITEM, id("screen_remote"))
+    val screenRemote: Item = Registry.register(BuiltInRegistries.ITEM, remoteKey, Item(Item.Properties().setId(remoteKey).stacksTo(1)))
     val cameraType: EntityType<CameraEntity> = Registry.register(BuiltInRegistries.ENTITY_TYPE,cameraKey,
         EntityType.Builder.of(::CameraEntity,MobCategory.MISC).sized(0.01f,0.01f).clientTrackingRange(32).updateInterval(1).build(cameraKey))
     fun initialize() {
         WorldCommands.register()
         BindingTool.initialize()
-        net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.FUNCTIONAL_BLOCKS).register { it.accept(speakerItem); it.accept(bindingTool) }
         net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.register { _, player, _, state, _ ->
             state.block !== screenBlock || (player as? net.minecraft.server.level.ServerPlayer)?.permissions()
                 ?.hasPermission(net.minecraft.server.permissions.Permissions.COMMANDS_GAMEMASTER) == true

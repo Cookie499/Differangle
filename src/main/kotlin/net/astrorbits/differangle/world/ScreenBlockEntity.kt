@@ -47,6 +47,8 @@ class ScreenBlockEntity(pos: BlockPos, state: BlockState) : BlockEntity(WorldRes
             if (config.media.sourceType.isMedia && config.media.positionGameTime < 0L) {
                 configure(config.copy(media = config.media.anchored(world.gameTime)))
             }
+            val media = config.media.finishIfDue(world.gameTime)
+            if (media !== config.media) configure(config.copy(media = media))
         }
     }
 

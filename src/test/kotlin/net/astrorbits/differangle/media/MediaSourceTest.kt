@@ -16,12 +16,28 @@ class MediaSourceTest {
     }
 
     @Test fun `changing source resets the synchronized timeline`() {
-        val changed = MediaConfig(MediaSourceType.VIDEO, "https://example.com/a.mp4", positionSeconds = 42.0)
+        val changed = MediaConfig(MediaSourceType.VIDEO, "https://example.com/a.mp4", positionSeconds = 42.0, durationMillis = 60_000L)
             .anchored(100L)
             .withSource(MediaSourceType.BILIBILI, "https://www.bilibili.com/video/BV1234", 200L)
         assertEquals(0.0, changed.positionSeconds)
         assertEquals(200L, changed.positionGameTime)
         assertEquals(1.0, changed.positionAt(220L))
+        assertEquals(0L, changed.durationMillis)
+    }
+
+    @Test fun `non looping playback clamps at the end and replay starts at zero`() {
+        val video = MediaConfig(MediaSourceType.VIDEO, "https://example.com/a.mp4", durationMillis = 10_000L)
+            .anchored(100L, 9.5)
+        assertEquals(video, video.finishIfDue(109L))
+        val finished = video.finishIfDue(110L)
+        assertEquals(true, finished.finished)
+        assertEquals(10.0, finished.positionAt(200L))
+        val replay = finished.togglePlayback(200L)
+        assertEquals(true, replay.playing)
+        assertEquals(0.0, replay.positionAt(200L))
+        val looped = video.copy(loop = true)
+        assertEquals(looped, looped.finishIfDue(130L))
+        assertEquals(1.0, looped.playbackPositionAt(130L))
     }
 
     @Test fun `detects supported URL families without inspecting query strings`() {

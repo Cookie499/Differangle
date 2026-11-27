@@ -11,6 +11,7 @@ enum class MediaSourceType(val serializedName: String) {
     IMAGE("image");
 
     val isMedia: Boolean get() = this != CAMERA
+    val isVideo: Boolean get() = this == VIDEO || this == BILIBILI
 
     companion object {
         fun parse(value: String): MediaSourceType = entries.firstOrNull {
@@ -30,6 +31,16 @@ enum class AudioAttenuation(val serializedName: String) {
     }
 }
 
+enum class MediaFit(val serializedName: String) {
+    STRETCH("stretch"),
+    FIT("fit");
+
+    companion object {
+        fun parse(value: String): MediaFit = entries.firstOrNull { it.serializedName == value }
+            ?: throw IllegalArgumentException("Unknown media fit mode: $value")
+    }
+}
+
 /** Network-safe, persistent settings. Login cookies and resolved temporary URLs never belong here. */
 data class MediaConfig(
     val sourceType: MediaSourceType = MediaSourceType.CAMERA,
@@ -41,17 +52,20 @@ data class MediaConfig(
     val volume: Float = 1.0f,
     val attenuation: AudioAttenuation = AudioAttenuation.LINEAR,
     val audibleDistance: Float = 32.0f,
-    val maxVideoHeight: Int = 720,
+    val maxVideoHeight: Int = MAX_SOURCE_HEIGHT,
     /** Server game time at which [positionSeconds] was established; -1 marks legacy unsynchronized data. */
     val positionGameTime: Long = -1L,
+    val durationMillis: Long = 0L,
+    val fit: MediaFit = MediaFit.STRETCH,
 ) {
     init {
         require(sourceUrl.length <= MAX_URL_LENGTH) { "Media URL is too long" }
         require(positionSeconds.isFinite() && positionSeconds >= 0.0) { "Invalid media position" }
         require(volume.isFinite() && volume in 0f..1f) { "Invalid media volume" }
         require(audibleDistance.isFinite() && audibleDistance in 1f..256f) { "Invalid audible distance" }
-        require(maxVideoHeight in 144..4320) { "Invalid maximum video height" }
+        require(maxVideoHeight in 144..MAX_SOURCE_HEIGHT) { "Invalid maximum video height" }
         require(positionGameTime >= -1L) { "Invalid media synchronization time" }
+        require(durationMillis >= 0L) { "Invalid media duration" }
         if (sourceType.isMedia) {
             require(sourceUrl.isNotBlank()) { "Media URL is required" }
             MediaUrls.requireHttp(sourceUrl)
@@ -68,12 +82,31 @@ data class MediaConfig(
     fun anchored(gameTime: Long, position: Double = positionSeconds): MediaConfig =
         copy(positionSeconds = position, positionGameTime = gameTime)
 
+    val finished: Boolean get() = !playing && durationMillis > 0L && positionSeconds >= durationMillis / 1000.0
+
+    fun playbackPositionAt(gameTime: Long): Double {
+        val position = positionAt(gameTime)
+        if (durationMillis == 0L) return position
+        val duration = durationMillis / 1000.0
+        return if (loop && !finished) position % duration else position.coerceAtMost(duration)
+    }
+
+    fun togglePlayback(gameTime: Long): MediaConfig =
+        copy(playing = !playing).anchored(gameTime, if (finished) 0.0 else playbackPositionAt(gameTime))
+
+    fun finishIfDue(gameTime: Long): MediaConfig {
+        if (!sourceType.isVideo || !playing || loop || durationMillis == 0L) return this
+        val end = durationMillis / 1000.0
+        return if (positionAt(gameTime) >= end) copy(playing = false).anchored(gameTime, end) else this
+    }
+
     /** A different source always starts on a fresh timeline. */
     fun withSource(type: MediaSourceType, url: String, gameTime: Long): MediaConfig =
-        copy(sourceType = type, sourceUrl = url).anchored(gameTime, 0.0)
+        copy(sourceType = type, sourceUrl = url, durationMillis = 0L).anchored(gameTime, 0.0)
 
     companion object {
         const val MAX_URL_LENGTH = 2048
+        const val MAX_SOURCE_HEIGHT = 4320
     }
 }
 

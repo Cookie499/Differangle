@@ -22,7 +22,7 @@ class CameraWorldRenderer(private val layers: CameraLayers, private val cameraSh
     private class ViewUniform(val camera: Matrix4f, val screen: Matrix4f, val zeroToOne: Boolean) : DynamicUniformStorage.DynamicUniform {
         override fun write(buffer: ByteBuffer) {
             Std140Builder.intoBuffer(buffer).putMat4f(camera).putMat4f(screen)
-                .putVec4(Vector4f(if (zeroToOne) 1f else 0f, if (RendererCompatibility.shadersEnabled()) 1f else 0f, 0f, 0f))
+                .putVec4(Vector4f(if (zeroToOne) 1f else 0f, if (RendererCompatibility.forwardDepth()) 1f else 0f, 0f, 0f))
         }
     }
     private class EnvironmentUniform(val e: CameraEnvironment, val sun: Vector4f, val moon: Vector4f) : DynamicUniformStorage.DynamicUniform {

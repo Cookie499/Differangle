@@ -3,6 +3,7 @@ package net.astrorbits.differangle.client.media
 import com.mojang.blaze3d.platform.NativeImage
 import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.textures.GpuTextureView
+import net.astrorbits.differangle.camera.Resolution
 import net.astrorbits.differangle.media.MediaBackend
 import net.astrorbits.differangle.media.MediaNetworkPolicy
 import net.astrorbits.differangle.media.MediaRequest
@@ -14,10 +15,11 @@ import net.minecraft.client.renderer.texture.DynamicTexture
 import net.minecraft.sounds.SoundSource
 import org.slf4j.LoggerFactory
 import org.watermedia.WaterMediaConfig
-import org.watermedia.api.media.MRL
-import org.watermedia.api.media.MediaAPI
-import org.watermedia.api.media.engines.AWTEngine
-import org.watermedia.api.media.players.MediaPlayer
+import org.watermedia.api.codecs.CodecsAPI
+import org.watermedia.api.player.AWTEngine
+import org.watermedia.api.player.MRL
+import org.watermedia.api.player.MediaPlayer
+import org.watermedia.api.player.PlayerAPI
 import org.watermedia.api.util.MediaQuality
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferInt
@@ -29,11 +31,13 @@ import kotlin.math.roundToLong
 /** Cross-platform WaterMedia adapter. Software frames keep the Minecraft GPU backend abstract. */
 class WaterMediaBackend : MediaBackend {
     override fun open(request: MediaRequest): MediaSession {
-        require(request.config.sourceType in setOf(MediaSourceType.VIDEO, MediaSourceType.BILIBILI))
-        ensureSoftwareDecoding()
-        val uri = MediaUrls.requireHttp(request.config.sourceUrl)
-        MediaNetworkPolicy.requirePublic(InetAddress.getAllByName(uri.host).asIterable())
-        return WaterMediaSession(request, MediaAPI.mrl(uri))
+        require(request.config.sourceType.isVideo)
+        return WaterMediaSession(request) {
+            ensureSoftwareDecoding()
+            val uri = MediaUrls.requireHttp(request.config.sourceUrl)
+            MediaNetworkPolicy.requirePublic(InetAddress.getAllByName(uri.host).asIterable())
+            PlayerAPI.mrl(uri)
+        }
     }
 
     companion object {
@@ -44,8 +48,8 @@ class WaterMediaBackend : MediaBackend {
         private fun ensureSoftwareDecoding() {
             if (softwareDecodingConfigured) return
             softwareDecodingConfigured = true
-            if (WaterMediaConfig.media.ffmpeg.hardwareAccel) {
-                WaterMediaConfig.media.ffmpeg.hardwareAccel = false
+            if (WaterMediaConfig.codecs.ffmpeg.hardwareAccel) {
+                WaterMediaConfig.codecs.ffmpeg.hardwareAccel = false
                 LOGGER.warn(
                     "Disabled WaterMedia hardware video decoding because its CUDA path stops " +
                         "releasing frames after approximately 33,520 decoded frames",
@@ -57,14 +61,16 @@ class WaterMediaBackend : MediaBackend {
 
 private class WaterMediaSession(
     initialRequest: MediaRequest,
-    private val mrl: MRL,
+    private val resolveMrl: () -> MRL,
 ) : TextureMediaSession {
+    private var mrl: MRL? = null
     @Volatile override var request: MediaRequest = initialRequest
         private set
     private val frameLock = Any()
     private var pendingPixels = IntArray(0)
     private var pendingWidth = 0
     private var pendingHeight = 0
+    private var sourceResolution: Resolution? = null
     private var hasPendingFrame = false
     private var player: MediaPlayer? = null
     private var texture: DynamicTexture? = null
@@ -76,7 +82,11 @@ private class WaterMediaSession(
     private var observedPlayerTime = -1L
     private var observedPlayerTimeNanos = 0L
     private var recoveryCount = 0
-    private var pendingInitialSeekMillis: Long? = null
+    private var pendingSeek = false
+    private var localEnded = false
+    private var resolvedDurationMillis = 0L
+    override val playbackDurationMillis get() = config.durationMillis.takeIf { it > 0L } ?: resolvedDurationMillis
+    override val playbackEnded get() = config.finished || localEnded
     @Volatile private var lastCapturedFrameNanos = 0L
     @Volatile private var frameCallbackFailureLogged = false
     @Volatile private var closed = false
@@ -89,54 +99,69 @@ private class WaterMediaSession(
         val previous = this.request
         val old = previous.config
         val next = request.config
+        val timelineChanged = old.positionSeconds != next.positionSeconds ||
+            old.positionGameTime != next.positionGameTime
         if (old.sourceType != next.sourceType || old.sourceUrl != next.sourceUrl ||
-            old.audioEnabled != next.audioEnabled) return false
+            old.audioEnabled != next.audioEnabled || old.finished != next.finished ||
+            localEnded && (timelineChanged || old.playing != next.playing)) return false
 
         this.request = request
         val active = player ?: return true
-        if (previous.width != request.width || previous.height != request.height) {
-            active.maxSize(request.width, request.height)
-        }
         if (old.maxVideoHeight != next.maxVideoHeight) active.quality(MediaQuality.of(next.maxVideoHeight))
         if (old.loop != next.loop) active.repeat(next.loop)
         updateAudio(active)
 
         val target = synchronizedPositionMillis(active)
         val actual = active.time()
-        val timelineChanged = old.positionSeconds != next.positionSeconds ||
-            old.positionGameTime != next.positionGameTime
         if (old.playing != next.playing) {
             if (next.playing) {
-                if (actual >= 0L && abs(actual - target) > CONTROL_SEEK_DRIFT_MILLIS) active.seek(target)
+                pendingSeek = actual < 0L || abs(actual - target) > CONTROL_SEEK_DRIFT_MILLIS
                 active.pause(false)
             } else {
                 active.pause(true)
-                if (actual >= 0L && abs(actual - target) > MAXIMUM_PAUSED_DRIFT_MILLIS) active.seek(target)
+                pendingSeek = actual < 0L || abs(actual - target) > MAXIMUM_PAUSED_DRIFT_MILLIS
             }
-        } else if (timelineChanged && actual >= 0L && abs(actual - target) > CONTROL_SEEK_DRIFT_MILLIS) {
-            active.seek(target)
-        }
+        } else if (timelineChanged) pendingSeek = true
         return true
     }
 
     override fun tick() {
-        if (closed) return
+        if (closed || playbackEnded) return
         val active = player
         if (active == null) {
+            if (!CodecsAPI.ffmpegLoaded()) {
+                fail(IllegalStateException("Video playback requires the FFmpeg libraries from WaterMedia Binaries"))
+                return
+            }
+            val mrl = mrl ?: resolveMrl().also { this.mrl = it }
             when (mrl.status()) {
                 MRL.Status.FETCHING -> Unit
-                MRL.Status.LOADED -> if (!attempted) createPlayer()
+                MRL.Status.LOADED -> if (!attempted) createPlayer(mrl)
                 MRL.Status.EXPIRED, MRL.Status.FORGOTTEN -> {
                     attempted = false
-                    mrl.reload()
+                    this.mrl = mrl.reload()
                 }
                 MRL.Status.ERROR, MRL.Status.BLOCKED -> fail(mrl.exception())
             }
             return
         }
         if (active.error()) fail(IllegalStateException("WaterMedia playback failed"))
+        updateSourceResolution(active)
+        if (!active.live() && active.duration() > 0L) resolvedDurationMillis = active.duration()
+        if (config.playing && !config.loop && active.ended() && !pendingSeek) {
+            if (resolvedDurationMillis == 0L) resolvedDurationMillis = active.time().coerceAtLeast(0L)
+            localEnded = true
+            playerGeneration++
+            player = null
+            audioOutput = null
+            active.release()
+            synchronized(frameLock) { hasPendingFrame = false }
+            texture?.close()
+            texture = null
+            return
+        }
         updateAudio(active)
-        applyInitialSeek(active)
+        applyPendingSeek(active)
         monitorVideoFrames(active)
         if (++synchronizationTicks >= SYNCHRONIZATION_INTERVAL_TICKS) {
             synchronizationTicks = 0
@@ -144,7 +169,7 @@ private class WaterMediaSession(
         }
     }
 
-    private fun createPlayer() {
+    private fun createPlayer(mrl: MRL) {
         attempted = true
         val generation = ++playerGeneration
         playerStartedNanos = System.nanoTime()
@@ -155,10 +180,10 @@ private class WaterMediaSession(
         var output: AWTEngine? = null
         var created: MediaPlayer? = null
         try {
-            created = MediaAPI.createPlayer(
+            created = PlayerAPI.player(
                 mrl,
                 {
-                    MediaAPI.awtEngine {
+                    PlayerAPI.awtEngine {
                         if (generation == playerGeneration && !closed) {
                             try {
                                 output?.image()?.let(::capture)
@@ -171,26 +196,30 @@ private class WaterMediaSession(
                         }
                     }.also { output = it }
                 },
-                { if (config.audioEnabled) MediaAPI.alEngine().also {
-                    val spatial = it as Any as SpatialAudioOutput
-                    spatial.differangleSpatial(request)
-                    if (generation == playerGeneration && !closed) audioOutput = spatial
-                } else null },
+                { if (config.audioEnabled) SpatialAudioOutput().also { audioOutput = it }.engine else null },
             ) ?: run {
+                audioOutput = null
                 fail(IllegalStateException("WaterMedia could not create a player"))
                 return
             }
             player = created
-            created.maxSize(request.width, request.height)
+            val limit = videoDimensionLimit()
+            created.scale(limit, limit)
+            sourceResolution = null
             created.quality(MediaQuality.of(config.maxVideoHeight))
             created.repeat(config.loop)
-            created.volume(mediaVolume())
+            updateAudio(created)
             if (config.playing) created.start() else created.startPaused()
-            val target = synchronizedPositionMillis(created)
-            pendingInitialSeekMillis = target.takeIf { it > 0L }
+            pendingSeek = config.positionSeconds > 0.0 || config.playing
         } catch (cause: Throwable) {
-            if (created != null) created.release() else output?.release()
+            if (created != null) {
+                runCatching(created::release).onFailure(cause::addSuppressed)
+            } else {
+                runCatching { output?.release() }.onFailure(cause::addSuppressed)
+                runCatching { audioOutput?.engine?.release() }.onFailure(cause::addSuppressed)
+            }
             player = null
+            audioOutput = null
             fail(cause)
         }
     }
@@ -218,16 +247,33 @@ private class WaterMediaSession(
         }
     }
 
-    private fun applyInitialSeek(active: MediaPlayer) {
-        val target = pendingInitialSeekMillis ?: return
-        if (active.loading() || !active.canSeek()) return
-        if (active.seek(target)) pendingInitialSeekMillis = null
+    private fun videoDimensionLimit() =
+        minOf(MAX_VIDEO_DIMENSION, RenderSystem.getDevice().deviceInfo.limits().maxTextureSize())
+
+    private fun updateSourceResolution(active: MediaPlayer) {
+        val width = active.sourceWidth()
+        val height = active.sourceHeight()
+        if (width <= 0 || height <= 0 || sourceResolution?.let { it.width == width && it.height == height } == true) return
+        val native = Resolution(width, height)
+        sourceResolution = native
+        val capped = native.limitedTo(videoDimensionLimit())
+        active.scale(capped.width, capped.height)
+    }
+
+    private fun applyPendingSeek(active: MediaPlayer) {
+        if (!pendingSeek || active.loading() || active.buffering()) return
+        if (!active.canSeek()) {
+            if (active.live() || active.ended()) pendingSeek = false
+            return
+        }
+        val target = synchronizedPositionMillis(active)
+        if (active.time() == target || active.seek(target) || active.ended()) pendingSeek = false
     }
 
     private fun updateAudio(active: MediaPlayer) {
         if (!config.audioEnabled) return
-        audioOutput?.differangleSpatial(request)
         active.volume(mediaVolume())
+        audioOutput?.update(request)
     }
 
     private fun synchronizePlayback(active: MediaPlayer) {
@@ -292,7 +338,7 @@ private class WaterMediaSession(
         audioOutput = null
         synchronizationTicks = 0
         playerStartedNanos = 0L
-        pendingInitialSeekMillis = null
+        pendingSeek = false
         lastCapturedFrameNanos = 0L
         observedPlayerTime = -1L
         observedPlayerTimeNanos = 0L
@@ -301,7 +347,7 @@ private class WaterMediaSession(
         try {
             // Bilibili playback uses expiring resolved DASH URLs. Reloading the MRL obtains fresh
             // stream URLs as well as resetting FFmpeg's demux/decode state.
-            mrl.reload()
+            mrl = mrl?.reload()
         } catch (cause: Throwable) {
             fail(cause)
         }
@@ -323,6 +369,7 @@ private class WaterMediaSession(
     @Synchronized
     override fun textureView(): GpuTextureView? {
         RenderSystem.assertOnRenderThread()
+        if (playbackEnded) return null
         synchronized(frameLock) {
             if (!hasPendingFrame) return texture?.textureView
             val current = texture
@@ -383,6 +430,7 @@ private class WaterMediaSession(
 
     companion object {
         private val LOGGER = LoggerFactory.getLogger("Differangle")
+        private const val MAX_VIDEO_DIMENSION = 8192
         private const val SYNCHRONIZATION_INTERVAL_TICKS = 20
         private const val CONTROL_SEEK_DRIFT_MILLIS = 1_000L
         private const val MAXIMUM_PAUSED_DRIFT_MILLIS = 100L

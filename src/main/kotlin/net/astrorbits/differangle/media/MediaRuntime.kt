@@ -3,16 +3,12 @@ package net.astrorbits.differangle.media
 /** Decoder/render implementations live in the client source set; this core owns their lifecycle. */
 data class MediaRequest(
     val config: MediaConfig,
-    val width: Int,
-    val height: Int,
-    val fps: Int,
     val x: Double = 0.0,
     val y: Double = 0.0,
     val z: Double = 0.0,
     val speakers: List<AudioEmitter> = emptyList(),
 ) {
     init {
-        require(width in 16..2048 && height in 16..2048 && fps in 1..240)
         require(x.isFinite() && y.isFinite() && z.isFinite())
         require(speakers.size <= 2)
     }
@@ -21,6 +17,8 @@ data class MediaRequest(
 interface MediaSession : AutoCloseable {
     val request: MediaRequest
     val config: MediaConfig get() = request.config
+    val playbackDurationMillis: Long get() = config.durationMillis
+    val playbackEnded: Boolean get() = config.finished
     /** Apply a compatible request without discarding decoder or texture state. */
     fun update(request: MediaRequest): Boolean = false
     fun tick()

@@ -114,7 +114,7 @@ class ImageDownloader(
     companion object {
         const val MAX_BYTES = 20 * 1024 * 1024
         const val MAX_DIMENSION = 8192
-        const val MAX_PIXELS = 32L * 1024 * 1024
+        const val MAX_PIXELS = 64L * 1024 * 1024
         const val MAX_REDIRECTS = 5
         private val CONNECT_TIMEOUT = Duration.ofSeconds(10)
         private val READ_TIMEOUT = Duration.ofSeconds(20)
@@ -123,9 +123,11 @@ class ImageDownloader(
 }
 
 private class ImageMediaSession(
-    override val request: MediaRequest,
+    initialRequest: MediaRequest,
     private val image: CompletableFuture<NativeImage>,
 ) : TextureMediaSession {
+    override var request = initialRequest
+        private set
     private var texture: DynamicTexture? = null
     private var decodedReleased = false
     @Volatile private var closed = false
@@ -144,6 +146,12 @@ private class ImageMediaSession(
     }
 
     override fun tick() {}
+
+    override fun update(request: MediaRequest): Boolean {
+        if (closed || request.config.sourceType != config.sourceType || request.config.sourceUrl != config.sourceUrl) return false
+        this.request = request
+        return true
+    }
 
     @Synchronized
     override fun textureView(): GpuTextureView? {

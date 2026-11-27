@@ -8,6 +8,28 @@ import org.junit.jupiter.api.Test
 
 class MirrorViewTest {
     @Test
+    fun `texture limits preserve native resolution and reduce larger sources proportionally`() {
+        val native = Resolution(7680, 4320)
+        assertSame(native, native.limitedTo(8192, 32L * 1024 * 1024))
+        assertEquals(Resolution(4096, 2304), native.limitedTo(4096))
+    }
+
+    @Test
+    fun `pixel dimensions grow as the mirror fills more of the viewport`() {
+        val viewport = Resolution(3840, 2160)
+        val screen = ScreenDefinition("mirror", "unbound", width = 4f, height = 2f, mirror = true)
+        val projection = Matrix4f().perspective(Math.toRadians(60.0).toFloat(), viewport.aspect, 0.05f, 256f)
+        fun resolution(distance: Double, limit: Long = 32L * 1024 * 1024) =
+            MirrorView.projectedResolution(screen, Position(0.0, 0.0, distance), projection, viewport, 1.0, 8192, limit)
+
+        val far = resolution(20.0)
+        val near = resolution(2.0)
+        assertTrue(near.width > far.width && near.height > far.height)
+        assertTrue(near.width > screen.resolution.width)
+        assertTrue(resolution(2.0, 500_000).pixels <= 500_000)
+    }
+
+    @Test
     fun `mirror corners match flipped texture corners from offset observers and rotated planes`() {
         for (rotation in listOf(Rotation(), Rotation.minecraftDegrees(37f, 25f, 18f))) {
             val screen = ScreenDefinition("mirror", "unbound", Position(1000.0, 70.0, -300.0), rotation,

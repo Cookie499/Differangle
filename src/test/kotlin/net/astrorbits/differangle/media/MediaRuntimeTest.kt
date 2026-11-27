@@ -17,7 +17,7 @@ class MediaRuntimeTest {
         val opened = mutableListOf<Session>()
         val runtime = MediaRuntime { request -> Session(request).also(opened::add) }
         val video = MediaConfig(MediaSourceType.VIDEO, "https://example.com/a.mp4")
-        fun request(config: MediaConfig) = MediaRequest(config, 256, 144, 15)
+        fun request(config: MediaConfig) = MediaRequest(config)
         runtime.sync(mapOf("camera" to request(MediaConfig()), "screen" to request(video)))
         runtime.tick()
         assertEquals(1, opened.size)

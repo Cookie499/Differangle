@@ -9,7 +9,9 @@ import com.mojang.brigadier.arguments.StringArgumentType
 import com.mojang.brigadier.builder.ArgumentBuilder
 import com.mojang.brigadier.context.CommandContext
 import com.mojang.brigadier.tree.CommandNode
+import com.mojang.blaze3d.systems.RenderSystem
 import net.astrorbits.differangle.camera.*
+import net.astrorbits.differangle.world.ScreenConfig
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
@@ -156,9 +158,12 @@ object CameraCommands {
                 text("differangle.preview.camera.fps.done")
             } })))
             camera.then(literal("resolution").then(cameraId(runtime)
-                .then(argument("width", IntegerArgumentType.integer(16, 2048)).then(argument("height", IntegerArgumentType.integer(16, 2048)).executes { ctx -> run(ctx, runtime) {
+                .then(argument("width", IntegerArgumentType.integer(16, ScreenConfig.MAX_RESOLUTION))
+                    .then(argument("height", IntegerArgumentType.integer(16, ScreenConfig.MAX_RESOLUTION)).executes { ctx -> run(ctx, runtime) {
+                    val resolution = Resolution(IntegerArgumentType.getInteger(ctx, "width"), IntegerArgumentType.getInteger(ctx, "height"))
+                    require(resolution.pixels <= ScreenConfig.MAX_PIXELS) { "Camera resolution exceeds the pixel limit." }
                     runtime.system.putCamera(getCamera(ctx, runtime).copy(
-                        resolution = Resolution(IntegerArgumentType.getInteger(ctx, "width"), IntegerArgumentType.getInteger(ctx, "height"))))
+                        resolution = resolution.limitedTo(RenderSystem.getDevice().deviceInfo.limits().maxTextureSize())))
                     text("differangle.preview.camera.resolution.done")
                 } }))))
             camera.then(literal("pose").then(pose(cameraId(runtime)) { ctx -> run(ctx, runtime) {

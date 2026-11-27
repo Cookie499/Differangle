@@ -1,6 +1,6 @@
 # 音响与绑定工具
 
-`differangle:speaker` 使用原版音符盒材质；`differangle:binding_tool` 使用木棍外观，两者位于创造模式功能方块栏。
+用 `/give @s differangle:speaker` 获取音响，用 `/give @s differangle:binding_tool` 获取绑定工具。音响使用原版音符盒材质，绑定工具使用木棍外观。
 
 手持绑定工具右键音响，依次记录左、右声道（最多两个，不接受重复音响）。只绑定一个音响时混合两个声道。右键摄像机则切换为保存一个摄像机 UUID；重新选择音响会切回音响模式。摄像机支持瞄准其位置附近 0.3 格选择，不能穿过方块。
 
@@ -8,6 +8,6 @@ Shift 右键任何位置清空工具。右键屏幕基座推送当前选择，�
 
 未绑定音响时从基座中心发声。绑定音响后，两个原生 OpenAL 单声道声源分别位于音响位置，由 Minecraft 的原版监听器实时处理玩家移动、转头和线性距离衰减；`audio_attenuation=none` 仍禁用距离衰减。只有一个音响（或未绑定）时，两个声源位于同一位置，各取一半音量以混合左右声道。被拆除、替换或未加载的音响静音，其 UUID 不会被同位置的新音响继承。绑定随基座保存和同步。
 
-实现将同一个解码器输出的 S16 双声道 PCM 无损拆成两个单声道队列，声音方位和衰减不再预先混入 PCM，因此位置变化无需等待旧音频队列播完。两个声源成对启动、暂停、调速和清空，保留 WaterMedia 左声道输出的播放时钟；任一队列满时都不会仅向另一声道追加数据。重新绑定或音响失效直接更新声源位置及音量，也无需重新解码。WaterMedia 的 SFXEngine 是 sealed，使用仅作用于本模组播放器实例的 ALEngine Mixin 接入。
+WaterMedia 的 `ALEngine` 将左右声道路由到两个单声道声源，同步控制播放，并以左声道计算播放时钟。重新绑定或音响失效时，Differangle 直接更新声源位置和音量，已排队的音频立即采用新设置。
 
 验证：`./gradlew build --offline`；隔离世界集成测试：`./gradlew runCameraTest -PcameraGameTest -PaudioBindingTest --offline`。

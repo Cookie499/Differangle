@@ -55,10 +55,10 @@ repositories {
 
 dependencies {
     // Optional renderer API; the mod is never bundled or required at runtime.
-    val sodiumApi = fileTree("run/mods") { include("*sodium-fabric-0.9.1+mc26.2.jar") }
-    val irisApi = fileTree("run/mods") { include("iris-fabric-1.11.2+mc26.2.jar") }
-    "clientCompileOnly"(if (sodiumApi.isEmpty) "maven.modrinth:AANobbMI:2Yom1N68" else sodiumApi)
-    "clientCompileOnly"(if (irisApi.isEmpty) "maven.modrinth:YL57xq9U:oaD6KQls" else irisApi)
+    val sodiumApi = fileTree("run/mods") { include("*sodium-fabric-0.9.2+mc26.2.jar") }
+    val irisApi = fileTree("run/mods") { include("iris-fabric-1.11.4+mc26.2.jar") }
+    "clientCompileOnly"(if (sodiumApi.isEmpty) "maven.modrinth:AANobbMI:xJZxADzI" else sodiumApi)
+    "clientCompileOnly"(if (irisApi.isEmpty) "maven.modrinth:YL57xq9U:gxZWWnKH" else irisApi)
     // To change the versions see the gradle.properties file
     minecraft("com.mojang:minecraft:${project.property("minecraft_version")}")
     implementation("net.fabricmc:fabric-loader:${project.property("loader_version")}")
@@ -68,8 +68,8 @@ dependencies {
 
     // Cross-platform media playback. These remain external Fabric dependencies so Differangle does
     // not redistribute WaterMedia or its native bundle inside its own jar.
-    implementation("maven.modrinth:G922NeHS:FdCZ5Rxq") // WaterMedia 3.0.0.23
-    implementation("maven.modrinth:4997XcoK:fYWsOuBz") // WaterMedia Binaries 3.0.0.6
+    implementation("maven.modrinth:G922NeHS:qvK4FaDU") // WaterMedia 3.0.3
+    "clientRuntimeOnly"("maven.modrinth:4997XcoK:AnGvGsnj") // WaterMedia Binaries 3.0.3
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.1")
 }

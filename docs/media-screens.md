@@ -55,7 +55,8 @@ ScreenBlockEntity / ScreenConfig（服务端持久化并同步）
 | `volume` | `1` | `0..1` |
 | `attenuation` | `linear` | `none` 或 `linear` |
 | `audibleDistance` | `32` | 线性衰减的最大方块距离 |
-| `maxVideoHeight` | `720` | Bilibili 格式选择上限 |
+| `maxVideoHeight` | `4320` | Bilibili 来源画质上限 |
+| `fit` | `stretch` | `stretch` 拉伸填满，`fit` 等比适配 |
 
 旧存档没有这些字段时按 `camera` 加载。媒体解析得到的临时地址、请求头、Cookie 和缓存路径只属于客户端内存或客户端私有配置。
 
@@ -70,11 +71,15 @@ ScreenBlockEntity / ScreenConfig（服务端持久化并同步）
 /differangle screen playback <x> <y> <z> <playing> <loop> <positionSeconds>
 ```
 
-屏幕 GUI 现有三页。第三页可以选择来源类型、填写 URL，并编辑播放、循环、音量、衰减、可听距离、播放位置和 Bilibili 最大画质。前两页继续编辑摄像机与几何参数。
+在“网络媒体”页选择来源，填写 URL 后点“应用”。已应用的视频可以直接播放、暂停、从头播放或切换循环。进度条显示当前位置与时长，点按或拖动后松开即可跳转。播放器读到时长后可以拖动进度条。直播等时长未知的来源只显示当前进度。
+
+媒体纹理使用来源像素尺寸，视频超出纹理上限时等比缩小。可在“网络媒体”页切换“拉伸填满”和“等比适配”，再点“应用”。等比适配保留完整画面，空余区域显示黑色。
+
+视频关闭循环时，播完自动暂停并黑屏，点击“重播”从头播放。管理员客户端读到时长后会同步给服务端，服务端据此保存结束状态。尚未同步时长时，各客户端在本地播放器播完后清空画面。
 
 ## WaterMedia 依赖与 Bilibili 解析
 
-视频由外部模组 `WaterMedia 3.0.0.23` 和 `WaterMedia Binaries 3.0.0.6` 提供。Differangle 不把它们合并进自己的 JAR；客户端需要同时安装两个依赖。Binaries 包含并按当前系统提取、校验 FFmpeg 原生库，当前支持：
+客户端需要安装 WaterMedia 和 WaterMedia Binaries 3.0.3 才能播放视频。专用服务端只需要 WaterMedia 3.0.3。Binaries 按当前系统提取并校验 FFmpeg 原生库，支持以下平台。
 
 - Windows x86-64；
 - Linux x86-64、ARM64；
@@ -155,4 +160,4 @@ WaterMedia 的 `ALEngine` 在 Minecraft 已创建的 OpenAL 上下文中输出�
 - **待回归**：在游戏世界中分别播放真实图片、MP4 和 Bilibili 地址，并验证多屏幕卸载、换维度和长时间播放。
 - **待实现**：WebP、临时 URL 无缝恢复、客户端服务器信任确认、跨屏幕资源共享和原生 GPU 纹理零拷贝。
 
-WaterMedia 与 WaterMedia Binaries 使用 PolyForm Strict 1.0.0。Differangle 只通过其公开 API 建立外部依赖，不复制源码、不修改依赖，也不把依赖重新打包进自己的产物。
+WaterMedia 与 WaterMedia Binaries 3.0.3 使用 Defensive Public Source (Non-Commercial) License v1.0.1。两个模组均作为外部依赖安装。

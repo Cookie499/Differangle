@@ -4,7 +4,6 @@
     "package": "net.astrorbits.differangle.mixin.client",
     "compatibilityLevel": "JAVA_25",
     "client": [
-        "WaterMediaAudioMixin",
         "CameraGameRendererMixin",
         "MirrorNameTagMixin",
         "SodiumCameraVisibilityMixin",

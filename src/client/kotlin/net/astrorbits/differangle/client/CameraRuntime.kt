@@ -1,9 +1,11 @@
 package net.astrorbits.differangle.client
 
+import com.mojang.blaze3d.pipeline.RenderTarget
 import com.mojang.blaze3d.pipeline.TextureTarget
 import com.mojang.blaze3d.systems.RenderSystem
 import net.astrorbits.differangle.camera.*
 import net.astrorbits.differangle.client.render.CameraWorldRenderer
+import net.astrorbits.differangle.client.render.CameraCompositor
 import net.astrorbits.differangle.client.render.CameraEnvironmentSampler
 import net.astrorbits.differangle.client.render.CameraGpuTimings
 import net.astrorbits.differangle.client.render.EmbeddedNativePipelines
@@ -14,6 +16,7 @@ import net.astrorbits.differangle.client.render.compat.IrisCameraScope
 import net.astrorbits.differangle.client.media.ClientMediaBackend
 import net.astrorbits.differangle.client.media.TextureMediaSession
 import net.astrorbits.differangle.media.MediaConfig
+import net.astrorbits.differangle.media.MediaFit
 import net.astrorbits.differangle.media.MediaRequest
 import net.astrorbits.differangle.media.MediaRuntime
 import net.astrorbits.differangle.media.MediaSourceType
@@ -23,6 +26,7 @@ import net.minecraft.client.Minecraft
 import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.network.chat.Component
 import net.minecraft.world.phys.AABB
+import org.joml.Matrix4f
 import org.joml.Vector3f
 import org.slf4j.LoggerFactory
 import kotlin.math.abs
@@ -48,7 +52,12 @@ class CameraRuntime : AutoCloseable {
     fun setMirrorResolutionScale(value: Double) {
         RenderSystem.assertOnRenderThread()
         config.saveMirrorResolutionScale(value)
-        mirrorResolutionScale = value.coerceIn(0.25, 1.0)
+        val scale = value.coerceIn(0.25, 1.0)
+        if (scale != mirrorResolutionScale) {
+            mirrorResolutionScale = scale
+            mirrors.values.forEach { it.target.destroyBuffers() }
+            mirrors.clear()
+        }
     }
 
     fun setCameraShaderRendering(enabled: Boolean) {
@@ -110,6 +119,7 @@ class CameraRuntime : AutoCloseable {
         var lastUsedNanos: Long,
         var renderedAtNanos: Long,
     )
+    private data class MirrorRequest(val screen: ScreenDefinition, val resolution: Resolution)
     private val mirrors = mutableMapOf<String, MirrorFrame>()
     private val embeddedCooldowns = mutableMapOf<String, Long>()
     private var media = MediaRuntime(ClientMediaBackend())
@@ -147,6 +157,8 @@ class CameraRuntime : AutoCloseable {
         })
         media.tick()
     }
+
+    fun mediaSession(screenId: String) = media.session(screenId)
 
     fun switchMode(value: CameraMode) {
         RenderSystem.assertOnRenderThread()
@@ -229,6 +241,15 @@ class CameraRuntime : AutoCloseable {
             it.isFrontFacing(origin) && camera.cullFrustum.isVisible(bounds(it, origin))
         }
         fun isMedia(screen: ScreenDefinition) = media.session(screen.id) is TextureMediaSession
+        fun drawMedia(screen: ScreenDefinition, target: RenderTarget, compositor: CameraCompositor): Boolean {
+            val session = media.session(screen.id) as? TextureMediaSession ?: return false
+            if (session.playbackEnded) return false
+            val image = session.textureView() ?: return false
+            val surface = if (session.config.fit == MediaFit.FIT)
+                screen.fitAspect(image.getWidth(0).toFloat() / image.getHeight(0)) else screen
+            compositor.surface(surface, origin, camera.viewRotationMatrix, target, image)
+            return true
+        }
         val visible = surfaces.filter { screen ->
             screen.enabled && (isMedia(screen) || if (screen.mirror) mode == CameraMode.TEXTURE else cameras[screen.cameraId]?.enabled == true)
         }
@@ -259,30 +280,40 @@ class CameraRuntime : AutoCloseable {
                 var mirrorDraws = 0
                 val requested = system.screens().filter { it.mirror && it.enabled }.associateBy { it.id }
                 mirrors.entries.removeIf { (id, frame) ->
-                    val screen = requested[id]
-                    if (screen == null || mirrorResolution(screen) != frame.resolution) {
+                    if (id !in requested) {
                         frame.target.destroyBuffers(); true
                     } else false
                 }
+                val viewport = Resolution(target.width, target.height)
+                val projection = Matrix4f(camera.projectionMatrix).mul(camera.viewRotationMatrix)
+                val maxDimension = minOf(MAX_MIRROR_DIMENSION, RenderSystem.getDevice().deviceInfo.limits().maxTextureSize())
                 val mirrorCandidates = visible.filter { it.mirror && !isMedia(it) }
                     .sortedByDescending { apparentArea(it, origin) }
+                    .map { screen ->
+                        val desired = MirrorView.projectedResolution(screen, origin, projection, viewport, mirrorResolutionScale,
+                            maxDimension, MAX_MIRROR_TARGET_PIXELS)
+                        val previous = mirrors[screen.id]?.resolution
+                        MirrorRequest(screen, stableMirrorResolution(desired, previous))
+                    }
                 val admittedMirrors = admitMirrors(mirrorCandidates)
-                val admittedIds = admittedMirrors.mapTo(mutableSetOf()) { it.id }
+                val admittedIds = admittedMirrors.mapTo(mutableSetOf()) { it.screen.id }
                 mirrors.entries.removeIf { (id, frame) ->
                     if (id in admittedIds || start - frame.lastUsedNanos < MIRROR_IDLE_NANOS) false
                     else { frame.target.destroyBuffers(); true }
                 }
                 makeMirrorRoom(admittedMirrors)
-                val updateOrder = admittedMirrors.sortedBy { mirrors[it.id]?.renderedAtNanos ?: Long.MIN_VALUE }
+                val updateOrder = admittedMirrors.sortedBy { mirrors[it.screen.id]?.renderedAtNanos ?: Long.MIN_VALUE }
                 val farPlane = (client.options.effectiveRenderDistance * 16f).coerceAtLeast(32f)
                 var allocations = 0
-                for (screen in updateOrder) {
+                for ((screen, desired) in updateOrder) {
                     if (mirrorUpdates >= MAX_MIRROR_UPDATES_PER_FRAME) break
                     val frame = mirrors[screen.id]
-                    if (frame == null && allocations >= MAX_MIRROR_ALLOCATIONS_PER_FRAME) continue
-                    val resolution = frame?.resolution ?: mirrorResolution(screen)
+                    val allocate = frame?.resolution != desired && allocations < MAX_MIRROR_ALLOCATIONS_PER_FRAME &&
+                        mirrorPixels() - (frame?.resolution?.pixels ?: 0L) + desired.pixels <= MAX_MIRROR_TARGET_PIXELS
+                    if (!allocate && frame == null) continue
+                    val resolution = if (allocate) desired else frame!!.resolution
                     val definition = MirrorView.camera(screen, mirrorEye, farPlane)?.copy(resolution = resolution) ?: continue
-                    var reflection = frame?.target
+                    var reflection = if (allocate) null else frame?.target
                     try {
                         if (reflection == null) {
                             allocations++
@@ -290,16 +321,19 @@ class CameraRuntime : AutoCloseable {
                                 true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM)
                         }
                         drawTexture(definition, reflection)
-                        if (frame == null) mirrors[screen.id] = MirrorFrame(reflection, resolution, start, start)
-                        else frame.renderedAtNanos = start
+                        if (allocate) {
+                            frame?.target?.destroyBuffers()
+                            mirrors[screen.id] = MirrorFrame(reflection, resolution, start, start)
+                        }
+                        else frame!!.renderedAtNanos = start
                         mirrorUpdates++
                     } catch (failure: Exception) {
-                        mirrors.remove(screen.id)
+                        if (!allocate) mirrors.remove(screen.id)
                         runCatching { reflection?.destroyBuffers() }
                         logger.error("[render] failed to refresh mirror {}", screen.id, failure)
                     }
                 }
-                for (screen in admittedMirrors) {
+                for ((screen, _) in admittedMirrors) {
                     val frame = mirrors[screen.id] ?: continue
                     frame.lastUsedNanos = start
                     try {
@@ -316,9 +350,7 @@ class CameraRuntime : AutoCloseable {
                 budgetFallbacks = mirrorCandidates.size - mirrorUpdates
                 var mediaDraws = 0
                 for (screen in visible.filter(::isMedia)) {
-                    val image = (media.session(screen.id) as TextureMediaSession).textureView() ?: continue
-                    gpu.compositor.surface(screen, origin, camera.viewRotationMatrix, target, image)
-                    mediaDraws++
+                    if (drawMedia(screen, target, gpu.compositor)) mediaDraws++
                 }
                 statistics = FrameStatistics(regular.cameraUpdates + mirrorUpdates, regular.screenDraws + mirrorDraws + mediaDraws,
                     regular.cachedCameraCount + mirrors.size)
@@ -337,11 +369,9 @@ class CameraRuntime : AutoCloseable {
                 // shared Texture cache, which updates at most one camera per main frame.
                 val fallback = system.renderFrame(start, cameraScreens.filter { it.id !in directIds }.map { it.id }, origin)
                 var directDraws = 0
+                var mediaDraws = 0
                 for (screen in visible.filter(::isMedia)) {
-                    val mediaSession = media.session(screen.id) as? TextureMediaSession
-                    mediaSession?.textureView()?.let { image ->
-                        gpu.compositor.surface(screen, origin, camera.viewRotationMatrix, target, image)
-                    }
+                    if (drawMedia(screen, target, gpu.compositor)) mediaDraws++
                 }
                 for (screen in direct) {
                     val source = cameras.getValue(screen.cameraId)
@@ -358,7 +388,7 @@ class CameraRuntime : AutoCloseable {
                     }
                 }
                 statistics = FrameStatistics(fallback.cameraUpdates + directDraws,
-                    fallback.screenDraws + directDraws + visible.count(::isMedia), fallback.cachedCameraCount)
+                    fallback.screenDraws + directDraws + mediaDraws, fallback.cachedCameraCount)
                 mirrorTargetCount = mirrors.size
                 mirrorTargetPixels = mirrorPixels()
             }
@@ -485,48 +515,47 @@ class CameraRuntime : AutoCloseable {
     }
 
     /** Admit the largest visible mirrors without exceeding persistent color+depth target limits. */
-    private fun admitMirrors(candidates: List<ScreenDefinition>): List<ScreenDefinition> {
+    private fun admitMirrors(candidates: List<MirrorRequest>): List<MirrorRequest> {
         var totalPixels = 0L
-        val result = ArrayList<ScreenDefinition>(minOf(candidates.size, MAX_MIRROR_TARGETS))
-        for (screen in candidates) {
-            val requested = pixels(mirrorResolution(screen))
+        val result = ArrayList<MirrorRequest>(minOf(candidates.size, MAX_MIRROR_TARGETS))
+        for (mirror in candidates) {
+            val requested = mirror.resolution.pixels
             if (result.size >= MAX_MIRROR_TARGETS || totalPixels + requested > MAX_MIRROR_TARGET_PIXELS) continue
-            result += screen
+            result += mirror
             totalPixels += requested
         }
         return result
     }
 
     /** Hidden cached targets are the first resources evicted when newly visible mirrors need room. */
-    private fun makeMirrorRoom(admitted: List<ScreenDefinition>) {
-        val protected = admitted.mapTo(mutableSetOf()) { it.id }
-        val missing = admitted.filter { it.id !in mirrors }
-        val missingPixels = missing.sumOf { pixels(mirrorResolution(it)) }
+    private fun makeMirrorRoom(admitted: List<MirrorRequest>) {
+        val protected = admitted.mapTo(mutableSetOf()) { it.screen.id }
+        val missing = admitted.count { it.screen.id !in mirrors }
+        val extraPixels = admitted.sumOf { (it.resolution.pixels - (mirrors[it.screen.id]?.resolution?.pixels ?: 0L)).coerceAtLeast(0L) }
         val removable = mirrors.entries.filter { it.key !in protected }.sortedBy { it.value.lastUsedNanos }.iterator()
-        while ((mirrors.size + missing.size > MAX_MIRROR_TARGETS ||
-                mirrorPixels() + missingPixels > MAX_MIRROR_TARGET_PIXELS) && removable.hasNext()) {
+        while ((mirrors.size + missing > MAX_MIRROR_TARGETS ||
+                mirrorPixels() + extraPixels > MAX_MIRROR_TARGET_PIXELS) && removable.hasNext()) {
             val entry = removable.next()
             mirrors.remove(entry.key)?.target?.destroyBuffers()
         }
     }
 
-    private fun mirrorResolution(screen: ScreenDefinition): Resolution {
-        val scale = mirrorResolutionScale
-        return Resolution(
-            (screen.resolution.width * scale).toInt().coerceAtLeast(16),
-            (screen.resolution.height * scale).toInt().coerceAtLeast(16),
-        )
+    private fun stableMirrorResolution(desired: Resolution, previous: Resolution?): Resolution {
+        if (previous == null) return desired
+        val widthRatio = desired.width.toDouble() / previous.width
+        val heightRatio = desired.height.toDouble() / previous.height
+        return if (widthRatio in 0.7..1.15 && heightRatio in 0.7..1.15) previous else desired
     }
 
-    private fun mirrorPixels(): Long = mirrors.values.sumOf { pixels(it.resolution) }
-    private fun pixels(resolution: Resolution): Long = resolution.width.toLong() * resolution.height
+    private fun mirrorPixels(): Long = mirrors.values.sumOf { it.resolution.pixels }
 
     private companion object {
         const val MAX_MIRROR_UPDATES_PER_FRAME = 2
         const val MAX_MIRROR_ALLOCATIONS_PER_FRAME = 1
         const val MAX_EMBEDDED_DRAWS_PER_FRAME = 2
         const val MAX_MIRROR_TARGETS = 8
-        const val MAX_MIRROR_TARGET_PIXELS = 8L * 1024L * 1024L
+        const val MAX_MIRROR_DIMENSION = 8192
+        const val MAX_MIRROR_TARGET_PIXELS = 32L * 1024L * 1024L
         const val MIRROR_IDLE_NANOS = 5_000_000_000L
         const val EMBEDDED_FAILURE_COOLDOWN_NANOS = 5_000_000_000L
     }

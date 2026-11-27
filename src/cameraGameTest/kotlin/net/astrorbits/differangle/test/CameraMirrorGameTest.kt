@@ -27,6 +27,11 @@ class CameraMirrorGameTest : FabricClientGameTest {
                 check((client.level!!.getBlockEntity(BlockPos(0,-59,5)) as ScreenBlockEntity).config.mirror)
             }
             await(context)
+            val farPixels = context.computeOnClient<Long, RuntimeException> { DifferangleClient.runtime.mirrorTargetPixels }
+            world.server.runCommand("tp @a 0.5 -60 3.5 0 0")
+            context.waitFor({ DifferangleClient.runtime.mirrorTargetPixels > farPixels * 2 }, 100)
+            world.server.runCommand("tp @a 0.5 -60 0.5 0 0")
+            context.waitFor({ DifferangleClient.runtime.mirrorTargetPixels <= farPixels }, 100)
             repeat(3) {
                 context.waitTicks(1)
                 context.runOnClient<RuntimeException> {
@@ -68,7 +73,7 @@ class CameraMirrorGameTest : FabricClientGameTest {
                 runtime.statistics.cameraUpdates == 2 && runtime.statistics.screenDraws == 2
             }, 200)
             context.runOnClient<RuntimeException> { DifferangleClient.runtime.clear() }
-            println("MIRROR PASS: unbound screen, observer motion, rotated plane, Texture-only, cloned NBT, simultaneous refresh")
+            println("MIRROR PASS: adaptive pixel count, observer motion, rotated plane, Texture-only, cloned NBT, simultaneous refresh")
         }
     }
     private fun await(context: ClientGameTestContext) {
