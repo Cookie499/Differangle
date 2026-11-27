@@ -70,6 +70,9 @@ class IrisShaderCameras : AutoCloseable {
         val visibility = requireNotNull(prepared.remove(context.view.camera)) { "Shader terrain was not prepared" }
         if (mainGeneration !== main) { releasePipelines(); mainGeneration = main }
         val camera = visibility.camera
+        val definition = context.view.camera
+        // Iris exposes forward Z to shader packs even when the GPU draws with reverse Z.
+        val gbufferProjection = definition.projectionMatrix()
         val cameraId = context.view.camera.id
         val refreshIndex = refreshCounters.getOrDefault(cameraId, 0L)
         refreshCounters[cameraId] = refreshIndex + 1
@@ -117,7 +120,7 @@ class IrisShaderCameras : AutoCloseable {
             ImmediateState.bypass = false
             ImmediateState.safeToMultiply = true
             captured.setGbufferModelView(state.viewRotationMatrix)
-            captured.setGbufferProjection(state.projectionMatrix)
+            captured.setGbufferProjection(gbufferProjection)
             captured.setTickDelta(client.deltaTracker.getGameTimeDeltaPartialTick(false))
             val fog = context.view.environment.fogColor
             captured.setFogColor(fog.x, fog.y, fog.z)
@@ -145,9 +148,8 @@ class IrisShaderCameras : AutoCloseable {
                                 if (mirrored) IrisVideoSettings.shadowDistance = shadowDistanceBackup
                                 Profiler.get().pop()
                             }
-                            // Shadow rendering restores the player's projection; restore this camera's projection too.
                             captured.setGbufferModelView(state.viewRotationMatrix)
-                            captured.setGbufferProjection(state.projectionMatrix)
+                            captured.setGbufferProjection(gbufferProjection)
                         }
                         entry.pipeline.onBeginClear()
                         drawSky(entry.sky, camera)

@@ -26,7 +26,6 @@ import net.minecraft.client.Minecraft
 import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.network.chat.Component
 import net.minecraft.world.phys.AABB
-import org.joml.Matrix4f
 import org.joml.Vector3f
 import org.slf4j.LoggerFactory
 import kotlin.math.abs
@@ -115,9 +114,10 @@ class CameraRuntime : AutoCloseable {
     private val prepared = mutableMapOf<ViewKey, PreparedCameraView>()
     private data class MirrorFrame(
         val target: TextureTarget,
-        val resolution: Resolution,
+        var resolution: Resolution,
         var lastUsedNanos: Long,
         var renderedAtNanos: Long,
+        var resizedAtNanos: Long,
     )
     private data class MirrorRequest(val screen: ScreenDefinition, val resolution: Resolution)
     private val mirrors = mutableMapOf<String, MirrorFrame>()
@@ -285,15 +285,19 @@ class CameraRuntime : AutoCloseable {
                     } else false
                 }
                 val viewport = Resolution(target.width, target.height)
-                val projection = Matrix4f(camera.projectionMatrix).mul(camera.viewRotationMatrix)
                 val maxDimension = minOf(MAX_MIRROR_DIMENSION, RenderSystem.getDevice().deviceInfo.limits().maxTextureSize())
                 val mirrorCandidates = visible.filter { it.mirror && !isMedia(it) }
                     .sortedByDescending { apparentArea(it, origin) }
                     .map { screen ->
-                        val desired = MirrorView.projectedResolution(screen, origin, projection, viewport, mirrorResolutionScale,
+                        val desired = MirrorView.projectedResolution(screen, origin, camera.projectionMatrix, viewport, mirrorResolutionScale,
                             maxDimension, MAX_MIRROR_TARGET_PIXELS)
-                        val previous = mirrors[screen.id]?.resolution
-                        MirrorRequest(screen, stableMirrorResolution(desired, previous))
+                        val previous = mirrors[screen.id]
+                        val resolution = when {
+                            previous == null -> desired
+                            start - previous.resizedAtNanos < MIRROR_RESIZE_INTERVAL_NANOS -> previous.resolution
+                            else -> stableMirrorResolution(desired, previous.resolution)
+                        }
+                        MirrorRequest(screen, resolution)
                     }
                 val admittedMirrors = admitMirrors(mirrorCandidates)
                 val admittedIds = admittedMirrors.mapTo(mutableSetOf()) { it.screen.id }
@@ -313,22 +317,31 @@ class CameraRuntime : AutoCloseable {
                     if (!allocate && frame == null) continue
                     val resolution = if (allocate) desired else frame!!.resolution
                     val definition = MirrorView.camera(screen, mirrorEye, farPlane)?.copy(resolution = resolution) ?: continue
-                    var reflection = if (allocate) null else frame?.target
+                    var reflection = frame?.target
                     try {
-                        if (reflection == null) {
-                            allocations++
-                            reflection = TextureTarget("Differangle mirror ${screen.id}", resolution.width, resolution.height,
-                                true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM)
-                        }
-                        drawTexture(definition, reflection)
                         if (allocate) {
-                            frame?.target?.destroyBuffers()
-                            mirrors[screen.id] = MirrorFrame(reflection, resolution, start, start)
+                            allocations++
+                            if (reflection == null) {
+                                reflection = TextureTarget("Differangle mirror ${screen.id}", resolution.width, resolution.height,
+                                    true, com.mojang.blaze3d.GpuFormat.RGBA8_UNORM)
+                            } else {
+                                // Iris resizes the attachments of this target without rebuilding its pipeline.
+                                reflection.resize(resolution.width, resolution.height)
+                            }
                         }
-                        else frame!!.renderedAtNanos = start
+                        drawTexture(definition, checkNotNull(reflection))
+                        if (frame == null) {
+                            mirrors[screen.id] = MirrorFrame(reflection, resolution, start, start, start)
+                        } else {
+                            frame.renderedAtNanos = start
+                            if (allocate) {
+                                frame.resolution = resolution
+                                frame.resizedAtNanos = start
+                            }
+                        }
                         mirrorUpdates++
                     } catch (failure: Exception) {
-                        if (!allocate) mirrors.remove(screen.id)
+                        mirrors.remove(screen.id)
                         runCatching { reflection?.destroyBuffers() }
                         logger.error("[render] failed to refresh mirror {}", screen.id, failure)
                     }
@@ -556,6 +569,7 @@ class CameraRuntime : AutoCloseable {
         const val MAX_MIRROR_TARGETS = 8
         const val MAX_MIRROR_DIMENSION = 8192
         const val MAX_MIRROR_TARGET_PIXELS = 32L * 1024L * 1024L
+        const val MIRROR_RESIZE_INTERVAL_NANOS = 250_000_000L
         const val MIRROR_IDLE_NANOS = 5_000_000_000L
         const val EMBEDDED_FAILURE_COOLDOWN_NANOS = 5_000_000_000L
     }

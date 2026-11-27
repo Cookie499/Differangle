@@ -4,16 +4,23 @@ import org.joml.Matrix4f
 import org.joml.Matrix4fc
 import org.joml.Vector2f
 import org.joml.Vector3d
+import org.joml.Vector3f
 import org.joml.Vector4f
 import kotlin.math.ceil
 
 /** Planar reflection with an off-axis frustum through the physical mirror corners. */
 object MirrorView {
     fun projectedResolution(
-        screen: ScreenDefinition, eye: Position, viewProjection: Matrix4fc,
+        screen: ScreenDefinition, eye: Position, projection: Matrix4fc,
         viewport: Resolution, scale: Double, maxDimension: Int, maxPixels: Long,
     ): Resolution {
-        val matrix = Matrix4f(viewProjection).mul(screen.modelMatrix(eye))
+        // Measure from the eye toward the mirror center so turning in place keeps the same texture size.
+        val towardMirror = Vector3f((screen.position.x - eye.x).toFloat(),
+            (screen.position.y - eye.y).toFloat(), (screen.position.z - eye.z).toFloat())
+        if (towardMirror.lengthSquared() < 0.0001f) return viewport.limitedTo(maxDimension, maxPixels)
+        val up = screen.rotation.quaternion().transform(Vector3f(0f, 1f, 0f))
+        if (towardMirror.cross(up, Vector3f()).lengthSquared() < 0.0001f) return Resolution(16, 16).limitedTo(maxDimension, maxPixels)
+        val matrix = Matrix4f(projection).lookAlong(towardMirror, up).mul(screen.modelMatrix(eye))
         fun project(x: Float, y: Float): Vector2f? {
             val clip = matrix.transform(Vector4f(x, y, 0f, 1f))
             if (clip.w <= 0.001f) return null
