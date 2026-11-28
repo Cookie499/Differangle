@@ -13,6 +13,7 @@ import net.astrorbits.differangle.client.render.MainViewEye
 import net.astrorbits.differangle.client.render.PreparedCameraView
 import net.astrorbits.differangle.client.render.TextureCameraBackend
 import net.astrorbits.differangle.client.render.compat.IrisCameraScope
+import net.astrorbits.differangle.client.world.WorldGeometry
 import net.astrorbits.differangle.client.media.ClientMediaBackend
 import net.astrorbits.differangle.client.media.TextureMediaSession
 import net.astrorbits.differangle.media.MediaConfig
@@ -267,10 +268,12 @@ class CameraRuntime : AutoCloseable {
             val housingStart = System.nanoTime()
             try {
                 net.astrorbits.differangle.client.world.WorldClient.blocks.forEach { block ->
-                    net.astrorbits.differangle.client.world.WorldGeometry.housing(block,origin,camera.viewRotationMatrix,target,gpu.compositor)
+                    WorldGeometry.housing(block,origin,camera.viewRotationMatrix,target,gpu.compositor)
                 }
-                net.astrorbits.differangle.client.world.WorldGeometry.debug(origin,camera.viewRotationMatrix,target,gpu.compositor)
-                surfaces.forEach { gpu.compositor.solid(it.modelMatrix(origin),camera.viewRotationMatrix,target) }
+                WorldGeometry.debug(origin,camera.viewRotationMatrix,target,gpu.compositor)
+                surfaces.forEach {
+                    gpu.compositor.backing(it.modelMatrix(origin),camera.viewRotationMatrix,target)
+                }
             } finally {
                 phaseHousingMillis = (System.nanoTime() - housingStart) / 1_000_000.0
             }

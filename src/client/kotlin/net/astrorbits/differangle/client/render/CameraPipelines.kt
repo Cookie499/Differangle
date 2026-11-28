@@ -52,13 +52,13 @@ object CameraPipelines {
         return RenderPipelines.register(builder.build())
     }
 
-    private fun surface(textured: Boolean, visibility: Boolean = false): RenderPipeline {
+    private fun surface(textured: Boolean, visibility: Boolean = false, writeDepth: Boolean = true): RenderPipeline {
         val builder = RenderPipeline.builder()
-            .withLocation(id(if (visibility) "pipeline/screen_visibility" else "pipeline/surface_$textured"))
+            .withLocation(id(if (visibility) "pipeline/screen_visibility" else "pipeline/surface_${textured}_$writeDepth"))
             .withVertexShader(id("core/surface")).withFragmentShader(id("core/surface"))
             .withBindGroupLayout(surface).withBindGroupLayout(BindGroupLayouts.PROJECTION)
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-            .withDepthStencilState(if (visibility) DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false) else DepthStencilState.DEFAULT).withCull(true)
+            .withDepthStencilState(DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, writeDepth)).withCull(true)
         if (visibility) builder.withColorTargetState(ColorTargetState(java.util.Optional.empty(), com.mojang.blaze3d.GpuFormat.R8_UNORM, ColorTargetState.WRITE_RED))
         if (textured) builder.withShaderDefine("TEXTURED").withBindGroupLayout(BindGroupLayouts.SAMPLER0)
         return RenderPipelines.register(builder.build())
@@ -72,6 +72,7 @@ object CameraPipelines {
     val embeddedTranslucent = terrain(true, false, true)
     val texturedSurface = surface(true)
     val backgroundSurface = surface(false)
+    val backingSurface = surface(false, writeDepth = false)
     val visibilitySurface = surface(false, true)
     private fun sky(embedded: Boolean): RenderPipeline {
         val builder = RenderPipeline.builder()

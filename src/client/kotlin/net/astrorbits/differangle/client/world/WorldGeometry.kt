@@ -8,6 +8,9 @@ import org.joml.*
 
 /** Constant-material housing is independent of Camera Targets, including missing/disabled cameras. */
 object WorldGeometry {
+    // The picture is drawn on the surface plane itself; the frame face behind it keeps a gap because coplanar
+    // quads resolve per pixel by depth rounding.
+    const val HOUSING_SETBACK = 0.04f
 
     fun housing(block: ScreenBlockEntity,origin: Position,view: Matrix4f,target: RenderTarget,gpu: CameraCompositor) {
         val c=block.config
@@ -15,7 +18,7 @@ object WorldGeometry {
         val model=Matrix4f().translation((screen.position.x-origin.x).toFloat(),(screen.position.y-origin.y).toFloat(),(screen.position.z-origin.z).toFloat()).rotate(screen.rotation.quaternion())
         val gray=Vector4f(.09f,.10f,.12f,1f)
         val depth=c.frameDepth
-        cube(Matrix4f(model).translate(0f,0f,-depth/2-.002f).scale(c.width,c.height,depth),view,target,gpu,gray)
+        cube(Matrix4f(model).translate(0f,0f,-depth/2-HOUSING_SETBACK).scale(c.width,c.height,depth),view,target,gpu,gray)
         for (side in listOf(-1f,1f)) {
             cube(Matrix4f(model).translate(side*(c.width)/2,0f,-depth/2).scale(0f,c.height,depth),view,target,gpu,gray)
             cube(Matrix4f(model).translate(0f,side*(c.height)/2,-depth/2).scale(c.width,0f,depth),view,target,gpu,gray)

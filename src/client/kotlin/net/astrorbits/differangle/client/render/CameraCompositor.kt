@@ -82,6 +82,23 @@ class CameraCompositor : AutoCloseable {
         }
     }
 
+    /**
+     * A screen's backdrop. It colors the surface rect through the depth test but leaves the depth buffer
+     * untouched: the picture drawn afterwards lands on the same plane with a different rect whenever the
+     * media is fitted, and two coplanar quads would otherwise trade pixels by depth rounding.
+     */
+    fun backing(model: Matrix4f, mainView: Matrix4f, target: RenderTarget, color: Vector4f = Vector4f(0f,0f,0f,1f)) {
+        val uniform = surfaces.writeUniform(SurfaceUniform(Matrix4f(mainView).mul(model),color))
+        RenderSystem.getDevice().createCommandEncoder().createRenderPass(
+            { "Differangle screen backing" },target.colorTextureView!!,Optional.empty(),target.depthTextureView!!,OptionalDouble.empty()
+        ).use { pass ->
+            pass.setPipeline(CameraPipelines.backingSurface)
+            pass.setUniform("Projection",RenderSystem.getProjectionMatrixBuffer()!!)
+            pass.setUniform("Surface",uniform)
+            pass.draw(6,1,0,0)
+        }
+    }
+
     private fun ensureDepth(width: Int, height: Int) {
         if (embeddedDepth != null && visibilityView != null && width == depthWidth && height == depthHeight) return
         embeddedDepthView?.close(); embeddedDepth?.close()
